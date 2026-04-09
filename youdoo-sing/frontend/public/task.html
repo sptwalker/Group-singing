@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>拼歌任务</title>
+    <link rel="stylesheet" href="css/common.css">
+    <link rel="stylesheet" href="css/task.css">
+</head>
+<body>
+    <div id="app" class="page task-page">
+        <!-- 顶部区 -->
+        <div class="task-header">
+            <div class="header-top">
+                <div class="song-title-area">
+                    <div class="current-song-title" id="songTitle">加载中...</div>
+                    <div class="current-song-artist" id="songArtist"></div>
+                </div>
+                <img class="user-avatar" id="userAvatar" src="" alt="头像" title="点击退出登录">
+            </div>
+            <div class="play-controls">
+                <button class="btn-ctrl" id="btnPlay" title="播放">▶</button>
+                <button class="btn-ctrl" id="btnPause" title="暂停">⏸</button>
+                <button class="btn-ctrl" id="btnStop" title="停止">⏹</button>
+                <div class="progress-bar-wrap" id="progressBar">
+                    <div class="progress-bar-fill" id="progressFill"></div>
+                </div>
+                <span class="time-label" id="timeLabel">0:00</span>
+            </div>
+            <div class="header-stats">
+                <div class="stat-item">📊 完成度 <span class="stat-value" id="statCompletion">0%</span></div>
+                <div class="stat-item">👥 参与 <span class="stat-value" id="statParticipants">0</span>人</div>
+                <div class="stat-item">🎵 <span class="stat-value" id="statSegments">0</span>段</div>
+            </div>
+        </div>
+
+        <!-- 歌词列表区（替代任务块矩阵） -->
+        <div class="lyrics-list-section">
+            <div class="lyrics-list-header">
+                <span>歌词任务</span>
+                <button class="btn-action btn-random" id="btnRandom">🎲 随机领取</button>
+            </div>
+            <div class="lyrics-task-list" id="lyricsTaskList"></div>
+        </div>
+
+        <!-- 翻页按钮 -->
+        <div class="page-nav left" id="navPrev">◀</div>
+        <div class="page-nav right" id="navNext">▶</div>
+
+        <!-- 底部录音展示区 -->
+        <div class="recordings-section">
+            <div class="recordings-header">
+                <span class="recordings-title">🎧 大家的录音</span>
+                <div class="sort-tabs">
+                    <button class="sort-tab active" data-sort="time">提交时间</button>
+                    <button class="sort-tab" data-sort="order">歌词顺序</button>
+                </div>
+            </div>
+            <div class="recording-list" id="recordingList">
+                <div class="empty-recordings">还没有人提交录音，快来第一个吧！</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/task.js"></script>
+</body>
+</html>

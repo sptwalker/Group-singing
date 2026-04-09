@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouDoo Sing · 管理后台</title>
+    <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+    <!-- 登录遮罩 -->
+    <div id="loginOverlay" class="login-overlay">
+        <div class="login-card">
+            <div class="login-logo">🎵</div>
+            <h1>YouDoo Sing</h1>
+            <p class="login-subtitle">管理后台</p>
+            <form id="loginForm" autocomplete="off">
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="loginUser" value="admin" required>
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" id="loginPass" placeholder="请输入密码" required>
+                </div>
+                <button type="submit" class="btn-login" id="btnLogin">登 录</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 主布局 -->
+    <div id="appMain" class="app-layout" style="display:none;">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <span class="brand-icon">🎵</span>
+                <span class="brand-text">YouDoo Admin</span>
+            </div>
+            <nav class="sidebar-nav">
+                <a class="nav-item active" data-module="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span>仪表盘</span>
+                </a>
+                <a class="nav-item" data-module="songs">
+                    <span class="nav-icon">🎶</span>
+                    <span>歌曲库</span>
+                </a>
+                <a class="nav-item" data-module="editor">
+                    <span class="nav-icon">✂️</span>
+                    <span>分段编辑器</span>
+                </a>
+                <a class="nav-item" data-module="tasks">
+                    <span class="nav-icon">📋</span>
+                    <span>任务管理</span>
+                </a>
+                <a class="nav-item" data-module="export">
+                    <span class="nav-icon">📦</span>
+                    <span>合成导出</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="btnLogout" class="btn-logout">退出登录</button>
+            </div>
+        </aside>
+
+        <!-- 内容区 -->
+        <main class="main-content">
+            <header class="topbar">
+                <button id="btnMenuToggle" class="btn-menu-toggle">☰</button>
+                <h2 id="pageTitle">仪表盘</h2>
+                <div class="topbar-right">
+                    <span id="adminName" class="admin-name">admin</span>
+                </div>
+            </header>
+            <div id="moduleContainer" class="module-container">
+                <!-- 模块内容动态渲染 -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <!-- 模态框容器 -->
+    <div id="modalContainer"></div>
+
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+    <script src="js/admin-core.js"></script>
+    <script src="js/admin-modules.js"></script>
+    <script src="js/admin-editor.js"></script>
+    <script src="js/admin-tasks.js"></script>
+</body>
+</html>

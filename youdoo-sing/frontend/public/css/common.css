@@ -1,0 +1,154 @@
+/* ===== 全局基础样式 ===== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+    --primary: #07c160;
+    --primary-dark: #06ad56;
+    --bg: #f5f6fa;
+    --card: #ffffff;
+    --text: #1a1a2e;
+    --text-secondary: #6b7280;
+    --text-light: #9ca3af;
+    --border: #e5e7eb;
+    --easy: #ffffff;
+    --easy-border: #d1d5db;
+    --normal: #10b981;
+    --hard: #3b82f6;
+    --completed: #9ca3af;
+    --chorus-glow: #f59e0b;
+    --danger: #ef4444;
+    --shadow: 0 2px 12px rgba(0,0,0,0.08);
+    --radius: 12px;
+    --max-w: 480px;
+}
+
+html, body {
+    width: 100%;
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+}
+
+.page {
+    max-width: var(--max-w);
+    margin: 0 auto;
+    min-height: 100vh;
+    position: relative;
+}
+
+/* ===== 按钮通用 ===== */
+button {
+    border: none;
+    outline: none;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+}
+button:active {
+    transform: scale(0.96);
+    opacity: 0.85;
+}
+
+/* ===== 弹窗通用 ===== */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+}
+.modal-box {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 28px 24px;
+    width: 100%;
+    max-width: 340px;
+    text-align: center;
+    box-shadow: var(--shadow);
+}
+.modal-box h3 {
+    font-size: 18px;
+    margin-bottom: 8px;
+}
+.modal-desc {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin-bottom: 20px;
+}
+
+/* ===== 骨架屏 ===== */
+.skeleton {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+}
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* ===== Toast ===== */
+.toast {
+    position: fixed;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-20px);
+    background: rgba(0,0,0,0.78);
+    color: #fff;
+    padding: 10px 24px;
+    border-radius: 20px;
+    font-size: 14px;
+    z-index: 9999;
+    opacity: 0;
+    transition: all 0.3s;
+    pointer-events: none;
+    max-width: 80%;
+    text-align: center;
+}
+.toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+/* ===== 波形占位 ===== */
+.waveform {
+    height: 32px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 0;
+}
+.waveform .bar {
+    width: 3px;
+    border-radius: 2px;
+    background: var(--primary);
+    animation: wave 1.2s ease-in-out infinite;
+}
+@keyframes wave {
+    0%, 100% { height: 6px; }
+    50% { height: 24px; }
+}
+
+/* ===== 播放按钮通用 ===== */
+.btn-play-mini {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+.btn-play-mini.playing {
+    background: var(--danger);
+}

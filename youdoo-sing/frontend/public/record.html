@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>录音</title>
+    <link rel="stylesheet" href="css/common.css">
+    <link rel="stylesheet" href="css/record.css">
+</head>
+<body>
+    <div id="app" class="page record-page">
+        <!-- 顶部 -->
+        <div class="record-header">
+            <button class="btn-back" id="btnBack">←</button>
+            <div class="record-title-area">
+                <div class="record-song-name" id="recSongName">加载中...</div>
+                <div class="record-seg-info" id="recSegInfo"></div>
+            </div>
+        </div>
+
+        <!-- 歌词区 -->
+        <div class="lyrics-container">
+            <div class="lyrics-arrow lyrics-arrow-left" style="display:none;">▼▼▼</div>
+            <div class="lyrics-section" id="lyricsSection"></div>
+            <div class="lyrics-arrow lyrics-arrow-right" style="display:none;">▼▼▼</div>
+        </div>
+
+        <!-- 控制区 -->
+        <div class="record-controls">
+            <div class="control-row">
+                <button class="btn-record-ctrl btn-audition" id="btnAudition">▶ 播放试唱</button>
+                <button class="btn-record-ctrl btn-record" id="btnRecord">🎤 录音</button>
+            </div>
+        </div>
+
+        <!-- 底部录音卡片区 -->
+        <div class="my-recordings-section">
+            <div class="my-rec-title">
+                <span>我的录音</span>
+                <span class="my-rec-count"><span id="recCount">0</span>/5</span>
+            </div>
+            <div class="my-rec-list" id="myRecList"></div>
+            <div class="my-rec-actions" id="recActions" style="display:none;">
+                <button class="btn-rec-play" id="btnRecPlay">▶ 播放</button>
+                <button class="btn-rec-delete" id="btnRecDelete">🗑 删除</button>
+                <button class="btn-rec-submit" id="btnRecSubmit">✓ 提交</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 安静提示 -->
+    <div class="quiet-tip" id="quietTip" style="display:none;">
+        <div class="quiet-icon">🤫</div>
+        <div class="quiet-text">请保持环境安静</div>
+        <div class="quiet-sub">即将开始录音...</div>
+    </div>
+
+    <!-- 倒计时（右上角） -->
+    <div class="countdown-overlay countdown-corner" id="countdownOverlay" style="display:none;">
+        <div class="countdown-num" id="countdownNum">3</div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/record.js"></script>
+</body>
+</html>
