@@ -95,10 +95,4 @@ async function confirmDeleteSong(songId) {
     } catch (e) { showToast(e.message, 'error'); }
 }
 
-function openEditorForSong(songId) {
-    switchModule('editor');
-    setTimeout(() => {
-        const sel = document.getElementById('editorSongSelect');
-        if (sel) { sel.value = songId; sel.dispatchEvent(new Event('change')); }
-    }, 500);
-}
+// openEditorForSong 已移至 admin-editor2.js

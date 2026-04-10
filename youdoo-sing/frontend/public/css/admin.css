@@ -494,18 +494,26 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .field-row .field { flex: 1; }
 
-/* ===== 分段编辑器 ===== */
+/* ===== 分段编辑器 - 3区布局 ===== */
+.editor-layout {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - var(--topbar-h));
+    margin: -24px;
+    overflow: hidden;
+}
+
+/* 顶部操作栏 */
 .editor-toolbar {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 12px 20px;
+    padding: 10px 20px;
     background: var(--card);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-sm);
-    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
     flex-wrap: wrap;
-    border: 1px solid var(--border-light);
+    z-index: 10;
 }
 .editor-toolbar select {
     padding: 7px 12px;
@@ -516,46 +524,280 @@ tbody tr:last-child td { border-bottom: none; }
     min-width: 180px;
 }
 .editor-toolbar select:focus { border-color: var(--primary); }
+.editor-toolbar .toolbar-title {
+    font-weight: 700; font-size: 15px; margin-right: 8px;
+}
+.editor-toolbar .toolbar-sep {
+    width: 1px; height: 24px; background: var(--border); margin: 0 4px;
+}
+.editor-toolbar .undo-redo { display: flex; gap: 4px; }
+.toolbar-spacer { flex: 1; }
 
-.waveform-container {
+/* 主面板：左侧唱段列表 + 右侧波形 */
+.editor-main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* 左侧唱段列表面板 */
+.seg-list-panel {
+    width: 320px;
+    flex-shrink: 0;
     background: var(--card);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--border-light);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
 }
-.waveform-header {
-    padding: 12px 20px;
+.seg-list-header {
+    padding: 12px 16px;
     border-bottom: 1px solid var(--border-light);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-}
-.waveform-header .song-info {
-    font-weight: 600;
-    font-size: 15px;
-}
-.waveform-header .time-display {
-    font-family: 'SF Mono', 'Consolas', monospace;
     font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+.seg-list-header .seg-count {
+    font-weight: 400;
     color: var(--text-secondary);
-    background: var(--border-light);
-    padding: 4px 10px;
-    border-radius: var(--radius-sm);
+    font-size: 12px;
 }
-#waveformWrap {
-    padding: 16px 20px;
-    min-height: 160px;
+.seg-list-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+}
+
+/* 唱段卡片 */
+.seg-card {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-light);
+    cursor: pointer;
+    transition: background var(--transition);
     position: relative;
+    border-left: 3px solid transparent;
 }
-.waveform-controls {
-    padding: 12px 20px;
-    border-top: 1px solid var(--border-light);
+.seg-card:hover { background: #f8fafc; }
+.seg-card.active {
+    background: var(--primary-bg);
+    border-left-color: var(--primary);
+}
+.seg-card-top {
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.seg-card-idx {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+.seg-card.active .seg-card-idx {
+    background: var(--primary);
+    color: #fff;
+}
+.seg-card-lyrics {
+    flex: 1;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.seg-card-badges {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.seg-card-time {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    padding-left: 32px;
+}
+.seg-card-time input {
+    width: 72px;
+    padding: 3px 6px;
+    border: 1.5px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: 'SF Mono','Consolas',monospace;
+    text-align: center;
+    outline: none;
+}
+.seg-card-time input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(79,70,229,0.1);
+}
+.seg-card-time .time-sep {
+    font-size: 12px;
+    color: var(--text-light);
+}
+.seg-card-actions {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+}
+
+/* 难度颜色标记 */
+.seg-diff-easy { background: #ecfdf5; color: #059669; }
+.seg-diff-normal { background: #eff6ff; color: #2563eb; }
+.seg-diff-hard { background: #fef3c7; color: #d97706; }
+.seg-card.chorus-seg { box-shadow: inset 0 0 0 1px #f59e0b; }
+
+/* 右侧波形编辑区 */
+.waveform-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+    position: relative;
+}
+.waveform-area {
+    flex: 1;
+    position: relative;
+    overflow-x: auto;
+    overflow-y: scroll;
+    scrollbar-gutter: stable both-edges;
+    contain: layout paint;
+    min-height: 180px;
+    background: var(--bg);
+}
+.wave-host {
+    position: relative;
+    min-height: 180px;
+    height: 180px;
+}
+#waveformWrap {
+    min-height: 180px;
+    height: 180px;
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+}
+
+/* 波形上的唱段覆盖层 */
+.seg-overlay-container {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    height: 180px;
+    pointer-events: none;
+    z-index: 8;
+    contain: layout paint;
+    overflow: hidden;
+}
+.seg-block {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    opacity: 0.35;
+    pointer-events: auto;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    border-radius: 2px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    overflow: hidden;
+}
+.seg-block:hover { opacity: 0.55; }
+.seg-block.active { opacity: 0.42; outline: 1px solid var(--primary); outline-offset: -1px; }
+.seg-block.playing { opacity: 0.42; box-shadow: none; }
+.seg-block-label {
+    font-size: 10px;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    padding: 2px 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+.seg-block.diff-easy { background: #10b981; }
+.seg-block.diff-normal { background: #3b82f6; }
+.seg-block.diff-hard { background: #f59e0b; }
+.seg-block.is-chorus { box-shadow: inset 0 0 8px rgba(245,158,11,0.8); border: 1px solid #f59e0b; }
+
+/* 拖拽手柄 */
+.seg-handle {
+    position: absolute;
+    top: 0;
+    width: 6px;
+    height: 100%;
+    cursor: ew-resize;
+    z-index: 6;
+    pointer-events: auto;
+}
+.seg-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 24px;
+    background: var(--primary);
+    border-radius: 1px;
+}
+.seg-handle-left { left: -3px; }
+.seg-handle-left::after { left: 2px; }
+.seg-handle-right { right: -3px; }
+.seg-handle-right::after { right: 2px; }
+
+/* 底部播放控制栏 */
+.editor-playbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    z-index: 10;
+}
+.playbar-time {
+    font-family: 'SF Mono','Consolas',monospace;
+    font-size: 13px;
+    color: var(--text-secondary);
+    min-width: 100px;
+    text-align: center;
+}
+.playbar-progress {
+    flex: 1;
+    height: 6px;
+    background: var(--border-light);
+    border-radius: 3px;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+}
+.playbar-progress-fill {
+    height: 100%;
+    background: var(--primary);
+    border-radius: 3px;
+    width: 0%;
+}
+.playbar-volume {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.playbar-volume input[type="range"] {
+    width: 80px;
+    accent-color: var(--primary);
 }
 .zoom-control {
     display: flex;
@@ -565,58 +807,60 @@ tbody tr:last-child td { border-bottom: none; }
     color: var(--text-secondary);
 }
 .zoom-control input[type="range"] {
-    width: 100px;
+    width: 80px;
     accent-color: var(--primary);
 }
 
-/* 分段列表 */
-.segments-panel {
-    margin-top: 16px;
-}
-.segment-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--border-light);
-    transition: background var(--transition);
-    cursor: pointer;
+/* 右键菜单 */
+.ctx-menu {
+    position: fixed;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+    z-index: 20000;
+    min-width: 160px;
+    padding: 4px 0;
     font-size: 13px;
 }
-.segment-row:hover { background: #f8fafc; }
-.segment-row.active { background: var(--primary-bg); border-left: 3px solid var(--primary); }
-.segment-row .seg-index {
-    width: 28px; height: 28px;
+.ctx-menu-item {
+    padding: 8px 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.15s;
+}
+.ctx-menu-item:hover { background: var(--primary-bg); color: var(--primary); }
+.ctx-menu-sep {
+    height: 1px;
     background: var(--border-light);
-    border-radius: 50%;
+    margin: 4px 0;
+}
+.ctx-menu-item.danger { color: var(--danger); }
+.ctx-menu-item.danger:hover { background: #fef2f2; }
+
+/* 编辑器空状态 */
+.editor-empty {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: 700;
-    font-size: 12px;
-    color: var(--text-secondary);
-    flex-shrink: 0;
-}
-.segment-row.active .seg-index {
-    background: var(--primary);
-    color: #fff;
-}
-.segment-row .seg-lyrics {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.segment-row .seg-time {
-    font-family: 'SF Mono', 'Consolas', monospace;
-    font-size: 12px;
+    height: 100%;
     color: var(--text-light);
-    flex-shrink: 0;
+    font-size: 15px;
+    flex-direction: column;
+    gap: 12px;
 }
-.segment-row .seg-actions {
-    display: flex;
-    gap: 4px;
-    flex-shrink: 0;
+.editor-empty .empty-icon { font-size: 48px; }
+
+/* 未保存标记 */
+.unsaved-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    background: var(--warning);
+    border-radius: 50%;
+    margin-left: 6px;
+    vertical-align: middle;
 }
 
 /* ===== 歌曲库 ===== */
