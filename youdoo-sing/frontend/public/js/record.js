@@ -475,16 +475,20 @@
     }
 
     // 播放选中录音
+    let _recPlaying = false; // 录音卡片的播放状态
     btnRecPlay.addEventListener('click', () => {
         if (selectedRecIndex < 0) return;
         const rec = myRecordings[selectedRecIndex];
-        if (AudioManager.isPlaying()) {
+        if (_recPlaying) {
             AudioManager.stop();
+            _recPlaying = false;
             btnRecPlay.textContent = '▶ 播放';
         } else {
             AudioManager.play(rec.url, () => {
+                _recPlaying = false;
                 btnRecPlay.textContent = '▶ 播放';
             });
+            _recPlaying = true;
             btnRecPlay.textContent = '⏹ 停止';
         }
     });
@@ -493,6 +497,8 @@
     btnRecDelete.addEventListener('click', () => {
         if (selectedRecIndex < 0) return;
         AudioManager.stop();
+        _recPlaying = false;
+        btnRecPlay.textContent = '▶ 播放';
         myRecordings.splice(selectedRecIndex, 1);
         myRecordings.forEach((r, i) => r.index = i + 1);
         selectedRecIndex = -1;
@@ -503,8 +509,11 @@
     // 提交选中录音
     btnRecSubmit.addEventListener('click', async () => {
         if (selectedRecIndex < 0) return;
+        if (btnRecSubmit.disabled) return; // 防重放
         const rec = myRecordings[selectedRecIndex];
         AudioManager.stop();
+        _recPlaying = false;
+        btnRecPlay.textContent = '▶ 播放';
 
         btnRecSubmit.textContent = '提交中...';
         btnRecSubmit.disabled = true;
