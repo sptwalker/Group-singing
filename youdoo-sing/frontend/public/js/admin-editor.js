@@ -91,8 +91,11 @@ function _stopEditorAudio(resetPlaybar = false) {
     document.getElementById('btnPlay')?.textContent = '▶';
     _playingSegOnly = false;
     _editorPlayingIdx = -1;
-    _editorPlayingBlock?.classList.remove('playing');
-    _editorPlayingBlock = null;
+    if(_editorPlayingBlock) {
+        _editorPlayingBlock.classList.remove('playing');
+        _editorPlayingBlock = null;
+    }
+    document.querySelectorAll('.seg-card .btn-outline[onclick^="_playSeg"]').forEach(btn => btn.textContent = '▶');
     if(resetPlaybar) _updatePlaybar(0);
 }
 
@@ -106,6 +109,13 @@ function _tickEditorAudio() {
                 editorAudio.currentTime = seg.start_time;
             } else {
                 editorAudio.pause();
+                // 清除唱段播放状态
+                if(_editorAudioRAF) { cancelAnimationFrame(_editorAudioRAF); _editorAudioRAF = 0; }
+                document.getElementById('btnPlay').textContent = '▶';
+                _playingSegOnly = false;
+                _editorPlayingIdx = -1;
+                _editorPlayingBlock?.classList.remove('playing');
+                _editorPlayingBlock = null;
                 return;
             }
         }
@@ -130,6 +140,13 @@ function _ensureEditorAudio() {
             _editorAudioRAF = 0;
         }
         _playingSegOnly = false;
+        // 清除唱段播放高亮
+        if(_editorPlayingBlock) {
+            _editorPlayingBlock.classList.remove('playing');
+            _editorPlayingBlock = null;
+        }
+        _editorPlayingIdx = -1;
+        document.querySelectorAll('.seg-card .btn-outline[onclick^="_playSeg"]').forEach(btn => btn.textContent = '▶');
     });
     editorAudio.addEventListener('ended', () => {
         document.getElementById('btnPlay').textContent = '▶';
@@ -138,6 +155,13 @@ function _ensureEditorAudio() {
             _editorAudioRAF = 0;
         }
         _playingSegOnly = false;
+        // 清除唱段播放高亮
+        if(_editorPlayingBlock) {
+            _editorPlayingBlock.classList.remove('playing');
+            _editorPlayingBlock = null;
+        }
+        _editorPlayingIdx = -1;
+        document.querySelectorAll('.seg-card .btn-outline[onclick^="_playSeg"]').forEach(btn => btn.textContent = '▶');
         _updatePlaybar(editorAudio?.duration || 0);
     });
     return editorAudio;
@@ -244,6 +268,14 @@ function _bindEditorEvents() {
     $('edSongSel').onchange = () => _loadSong($('edSongSel').value);
     $('btnPlay').onclick = async () => {
         if(!editorSong) return;
+        // 如果当前有唱段在播放，先清除其高亮状态
+        if(_playingSegOnly && _editorPlayingBlock) {
+            _editorPlayingBlock.classList.remove('playing');
+            _editorPlayingBlock = null;
+            _editorPlayingIdx = -1;
+            _playingSegOnly = false;
+            document.querySelectorAll('.seg-card .btn-outline[onclick^="_playSeg"]').forEach(btn => btn.textContent = '▶');
+        }
         const audio = _ensureEditorAudio();
         if(audio.paused) {
             try {
@@ -471,8 +503,24 @@ function _highlightAtTime() {
 
 function _playSeg(idx) {
     if(!editorSegments[idx] || !editorSong) return;
+    // 先停止上一个播放的唱段高亮
+    if(_editorPlayingBlock) {
+        _editorPlayingBlock.classList.remove('playing');
+        _editorPlayingBlock = null;
+    }
     _selectSeg(idx, false);
     _playingSegOnly = true;
+    // 设置当前播放唱段的 UI 状态
+    const ov = document.getElementById('segOverlay');
+    const blocks = ov ? Array.from(ov.children) : [];
+    _editorPlayingIdx = idx;
+    _editorPlayingBlock = blocks[idx] || null;
+    if(_editorPlayingBlock) _editorPlayingBlock.classList.add('playing');
+    // 更新列表中的播放按钮文字
+    document.querySelectorAll('.seg-card').forEach((card, i) => {
+        const btn = card.querySelector('.btn-outline[onclick^="_playSeg"]');
+        if(btn) btn.textContent = i === idx ? '⏸' : '▶';
+    });
     const audio = _ensureEditorAudio();
     audio.currentTime = editorSegments[idx].start_time;
     audio.volume = (+document.getElementById('wsVol')?.value || 0) / 100;
