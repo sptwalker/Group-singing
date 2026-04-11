@@ -287,7 +287,21 @@ function _bindEditorEvents() {
         }
     };
     $('btnLoop').onclick = () => { _loopPlay = !_loopPlay; $('btnLoop').classList.toggle('btn-primary', _loopPlay); $('btnLoop').classList.toggle('btn-outline', !_loopPlay); };
-    $('wsZoom').oninput = () => {};
+    $('wsZoom').oninput = () => {
+        if(!editorWS || !editorSong) return;
+        const sliderVal = +$('wsZoom').value;
+        // Set container width BEFORE zoom so WaveSurfer knows the target width
+        const dur = editorWS.getDuration() || editorSong.duration || 0;
+        const targetWidth = Math.round(dur * sliderVal);
+        const host = document.getElementById('waveHost');
+        const ov = document.getElementById('segOverlay');
+        if(host) host.style.width = targetWidth + 'px';
+        if(ov) ov.style.width = targetWidth + 'px';
+        editorWS.zoom(sliderVal);
+        // Sync metrics after zoom to pick up actual waveform dimensions
+        _syncWaveMetrics();
+        _renderOverlay();
+    };
     $('wsVol').oninput = e => {
         if(editorAudio) editorAudio.volume = +e.target.value/100;
     };
@@ -378,8 +392,8 @@ function _initWS() {
             cursorWidth:0,
             height:160,
             normalize:false,
-            minPxPerSec:0,
-            fillParent:true,
+            minPxPerSec:10,
+            fillParent:false,
             autoScroll:false,
             autoCenter:false,
             interact:false,
@@ -400,6 +414,14 @@ function _initWS() {
         wrap.querySelector('.loading')?.remove();
         _ensureWaveOverlayHost();
         editorWS.setMuted?.(true);
+        // Set initial container width based on zoom slider
+        const initZoom = +document.getElementById('wsZoom')?.value || 10;
+        const dur = editorWS.getDuration() || editorSong?.duration || 0;
+        const initWidth = Math.round(dur * initZoom);
+        const host = document.getElementById('waveHost');
+        const ov = document.getElementById('segOverlay');
+        if(host) host.style.width = initWidth + 'px';
+        if(ov) ov.style.width = initWidth + 'px';
         _syncWaveMetrics();
         _renderOverlay();
         _ensureEditorAudio();
