@@ -227,7 +227,10 @@ html, body {
 .module-container {
     flex: 1;
     padding: 24px;
-    overflow-y: auto;
+    overflow: hidden;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 /* ===== 通用组件 ===== */
@@ -498,9 +501,12 @@ tbody tr:last-child td { border-bottom: none; }
 .editor-layout {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - var(--topbar-h));
-    margin: -24px;
+    height: 100%;
+    min-height: 0;
+    margin: 0;
     overflow: hidden;
+    background: var(--bg);
+    border-radius: var(--radius);
 }
 
 /* 顶部操作栏 */
@@ -513,7 +519,9 @@ tbody tr:last-child td { border-bottom: none; }
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     flex-wrap: wrap;
-    z-index: 10;
+    position: sticky;
+    top: 0;
+    z-index: 20;
 }
 .editor-toolbar select {
     padding: 7px 12px;
@@ -531,7 +539,10 @@ tbody tr:last-child td { border-bottom: none; }
     width: 1px; height: 24px; background: var(--border); margin: 0 4px;
 }
 .editor-toolbar .undo-redo { display: flex; gap: 4px; }
-.toolbar-spacer { flex: 1; }
+.editor-toolbar-zoom {
+    margin-left: auto;
+}
+.toolbar-spacer { flex: 1 1 auto; }
 
 /* 主面板：左侧唱段列表 + 右侧波形 */
 .editor-main {
@@ -658,63 +669,82 @@ tbody tr:last-child td { border-bottom: none; }
 /* 右侧波形编辑区 */
 .waveform-panel {
     flex: 1;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-rows: minmax(220px, 1fr) auto minmax(240px, 280px);
     overflow: hidden;
     background: var(--bg);
     position: relative;
+    z-index: 1;
+    min-width: 0;
+    min-height: 0;
 }
 .waveform-area {
-    flex: 1;
     position: relative;
     overflow-x: auto;
-    overflow-y: scroll;
-    scrollbar-gutter: stable both-edges;
-    contain: layout paint;
-    min-height: 180px;
+    overflow-y: hidden;
+    min-height: 220px;
     background: var(--bg);
+    min-width: 0;
+    min-height: 0;
+    padding: 18px 18px 12px;
 }
 .wave-host {
     position: relative;
     min-height: 180px;
     height: 180px;
+    min-width: 100%;
+    overflow: visible;
+    isolation: isolate;
+    flex-shrink: 0;
+    background: var(--card);
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+}
+#waveform {
+    position: relative;
+    z-index: 1;
+    height: 180px;
 }
 #waveformWrap {
     min-height: 180px;
     height: 180px;
+    min-width: 100%;
     position: relative;
     isolation: isolate;
-    overflow: hidden;
+    overflow: visible;
+    z-index: 1;
 }
 
 /* 波形上的唱段覆盖层 */
 .seg-overlay-container {
     position: absolute;
-    inset: 0 auto auto 0;
+    left: 0;
+    top: 0;
     width: 100%;
     height: 180px;
-    pointer-events: none;
-    z-index: 8;
-    contain: layout paint;
+    pointer-events: auto;
+    z-index: 50;
     overflow: hidden;
+    border-radius: 12px;
 }
 .seg-block {
     position: absolute;
-    top: 0;
-    bottom: 0;
-    opacity: 0.35;
+    opacity: 0.82;
     pointer-events: auto;
     cursor: pointer;
-    transition: opacity 0.15s;
-    border-radius: 2px;
+    transition: opacity 0.15s, transform 0.15s;
+    border-radius: 6px;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: center;
     overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.35);
+    transform: translateZ(0);
 }
-.seg-block:hover { opacity: 0.55; }
-.seg-block.active { opacity: 0.42; outline: 1px solid var(--primary); outline-offset: -1px; }
-.seg-block.playing { opacity: 0.42; box-shadow: none; }
+.seg-block:hover { opacity: 0.82; }
+.seg-block.active { opacity: 0.95; outline: 2px solid var(--primary); outline-offset: -2px; }
+.seg-block.playing { opacity: 0.98; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.75); }
 .seg-block-label {
     font-size: 10px;
     color: #fff;
@@ -755,63 +785,134 @@ tbody tr:last-child td { border-bottom: none; }
 .seg-handle-right { right: -3px; }
 .seg-handle-right::after { right: 2px; }
 
-/* 底部播放控制栏 */
-.editor-playbar {
+.waveform-controls.compact-controls {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 20px;
+    gap: 10px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-light);
+    border-bottom: 1px solid var(--border-light);
     background: var(--card);
-    border-top: 1px solid var(--border);
     flex-shrink: 0;
-    z-index: 10;
+    z-index: 15;
+    flex-wrap: nowrap;
+    min-width: 0;
 }
-.playbar-time {
+.waveform-controls.compact-controls .toolbar-spacer {
+    flex: 1 1 auto;
+    min-width: 12px;
+}
+.waveform-controls.compact-controls .time-display {
+    flex: 0 0 118px;
+    min-width: 118px;
     font-family: 'SF Mono','Consolas',monospace;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-secondary);
-    min-width: 100px;
     text-align: center;
 }
-.playbar-progress {
-    flex: 1;
-    height: 6px;
-    background: var(--border-light);
-    border-radius: 3px;
-    cursor: pointer;
-    position: relative;
-    overflow: hidden;
+.waveform-controls.compact-controls .btn {
+    flex: 0 0 auto;
 }
-.playbar-progress-fill {
-    height: 100%;
-    background: var(--primary);
-    border-radius: 3px;
-    width: 0%;
-}
-.playbar-volume {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-.playbar-volume input[type="range"] {
-    width: 80px;
+.waveform-controls.compact-controls input[type="range"] {
     accent-color: var(--primary);
+    min-width: 0;
 }
-.zoom-control {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--text-secondary);
+.waveform-controls.compact-controls #wsZoom {
+    flex: 0 0 140px;
+    width: 140px;
 }
-.zoom-control input[type="range"] {
-    width: 80px;
-    accent-color: var(--primary);
+.waveform-controls.compact-controls #wsVol {
+    flex: 0 0 110px;
+    width: 110px;
+}
+.zoom-label,
+.time-display,
+.vol-label {
+    flex: 0 0 auto;
 }
 
-/* 右键菜单 */
+
+.edit-form-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-top: 1px solid var(--border-light);
+    background: var(--card);
+    padding: 16px 18px 18px;
+    overflow: auto;
+}
+.edit-form-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.edit-form-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+}
+.edit-form-subtitle {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.form-row > label,
+.form-row > div > label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+.form-row input,
+.form-row select,
+.form-row textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: #fff;
+    font-size: 13px;
+    outline: none;
+}
+.form-row textarea {
+    resize: vertical;
+    min-height: 120px;
+}
+.form-row input:focus,
+.form-row select:focus,
+.form-row textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(79,70,229,0.08);
+}
+.form-row.two-cols {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+.checkbox-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+.checkbox-inline input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+}
+
 .ctx-menu {
     position: fixed;
     background: var(--card);

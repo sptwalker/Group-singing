@@ -1,5 +1,9 @@
 // ===== 分段编辑器 - Part2: 交互/拖拽/撤销/菜单/保存 =====
 
+if(!window.__EDITOR_PART1_OK__) {
+    console.warn('[editor2] Part1 未就绪，跳过 Part2 初始化');
+}
+
 function _getEditorDuration() {
     return editorAudio?.duration || editorWS?.getDuration?.() || editorSong?.duration || 0;
 }
@@ -9,123 +13,26 @@ function _getEditorCurrentTime() {
     return editorWS?.getCurrentTime?.() || 0;
 }
 
-// ===== 撤销/重做 =====
-function _pushHistory() {
-    editorHistoryIdx++;
-    editorHistory.length = editorHistoryIdx;
-    editorHistory.push(JSON.stringify(editorSegments));
-    if(editorHistory.length > HIST_MAX) { editorHistory.shift(); editorHistoryIdx--; }
-    _updateUndoBtn();
-}
-function _markDirty() {
-    editorDirty = true;
-    const dot = document.getElementById('edUnsaved');
-    if(dot) dot.style.display = '';
-}
-function edUndo() {
-    if(editorHistoryIdx <= 0) return;
-    editorHistoryIdx--;
-    editorSegments = JSON.parse(editorHistory[editorHistoryIdx]);
-    _markDirty(); _renderSegList(); _renderOverlay(); _updateUndoBtn();
-}
-function edRedo() {
-    if(editorHistoryIdx >= editorHistory.length-1) return;
-    editorHistoryIdx++;
-    editorSegments = JSON.parse(editorHistory[editorHistoryIdx]);
-    _markDirty(); _renderSegList(); _renderOverlay(); _updateUndoBtn();
-}
-function _updateUndoBtn() {
-    const u = document.getElementById('btnUndo'), r = document.getElementById('btnRedo');
-    if(u) u.disabled = editorHistoryIdx <= 0;
-    if(r) r.disabled = editorHistoryIdx >= editorHistory.length-1;
-}
-function _commitChange() { _pushHistory(); _markDirty(); _renderSegList(); _renderOverlay(); }
-
-// ===== 拖拽手柄 =====
-let _dragInfo = null;
-function _startDrag(e) {
-    e.preventDefault(); e.stopPropagation();
-    const idx = +e.target.dataset.idx, side = e.target.dataset.side;
-    if(!editorWS) return;
-    const dur = editorWS.getDuration();
-    const wrap = document.getElementById('waveformWrap');
-    const ww = wrap.scrollWidth;
-    _dragInfo = { idx, side, dur, ww, startX: e.clientX, origStart: editorSegments[idx].start_time, origEnd: editorSegments[idx].end_time };
-    document.addEventListener('mousemove', _onDrag);
-    document.addEventListener('mouseup', _endDrag);
-}
-function _onDrag(e) {
-    if(!_dragInfo) return;
-    const { idx, side, dur, ww, startX, origStart, origEnd } = _dragInfo;
-    const dx = e.clientX - startX;
-    const dt = (dx / ww) * dur;
-    const seg = editorSegments[idx];
-    if(side === 'left') {
-        let newStart = Math.max(0, origStart + dt);
-        // 防止与前一段重叠
-        if(idx > 0) newStart = Math.max(editorSegments[idx-1].end_time, newStart);
-        // 最小时长
-        if(seg.end_time - newStart < SEG_MIN_DUR) newStart = seg.end_time - SEG_MIN_DUR;
-        seg.start_time = Math.round(newStart * 10) / 10;
-    } else {
-        let newEnd = Math.min(dur, origEnd + dt);
-        if(idx < editorSegments.length-1) newEnd = Math.min(editorSegments[idx+1].start_time, newEnd);
-        if(newEnd - seg.start_time < SEG_MIN_DUR) newEnd = seg.start_time + SEG_MIN_DUR;
-        seg.end_time = Math.round(newEnd * 10) / 10;
-    }
-    _renderOverlay();
-    // 实时更新列表中的时间输入框
-    const cards = document.querySelectorAll('.seg-card');
-    if(cards[idx]) {
-        const inputs = cards[idx].querySelectorAll('input[type="number"]');
-        if(inputs[0]) inputs[0].value = seg.start_time.toFixed(1);
-        if(inputs[1]) inputs[1].value = seg.end_time.toFixed(1);
-    }
-}
-function _endDrag() {
-    document.removeEventListener('mousemove', _onDrag);
-    document.removeEventListener('mouseup', _endDrag);
-    if(_dragInfo) { _commitChange(); _dragInfo = null; }
-}
-
-// ===== 时间输入框修改 =====
-function _onTimeInput(el) {
-    const idx = +el.dataset.idx, field = el.dataset.field;
-    let val = parseFloat(el.value);
-    if(isNaN(val) || val < 0) return;
-    const seg = editorSegments[idx];
-    const dur = _getEditorDuration() || 9999;
-    if(field === 'start_time') {
-        val = Math.max(0, val);
-        if(idx > 0) val = Math.max(editorSegments[idx-1].end_time, val);
-        if(seg.end_time - val < SEG_MIN_DUR) val = seg.end_time - SEG_MIN_DUR;
-        seg.start_time = Math.round(val*10)/10;
-    } else {
-        val = Math.min(dur, val);
-        if(idx < editorSegments.length-1) val = Math.min(editorSegments[idx+1].start_time, val);
-        if(val - seg.start_time < SEG_MIN_DUR) val = seg.start_time + SEG_MIN_DUR;
-        seg.end_time = Math.round(val*10)/10;
-    }
-    el.value = seg[field].toFixed(1);
-    _commitChange();
-}
 
 // ===== 微调时间 (←/→) =====
 function _nudgeSegTime(dt) {
     if(editorActiveIdx < 0) return;
     const seg = editorSegments[editorActiveIdx];
     const dur = _getEditorDuration() || 9999;
-    let ns = seg.start_time + dt, ne = seg.end_time + dt;
-    if(ns < 0) { ne -= ns; ns = 0; }
-    if(ne > dur) { ns -= (ne-dur); ne = dur; }
-    const prev = editorActiveIdx > 0 ? editorSegments[editorActiveIdx-1] : null;
-    const next = editorActiveIdx < editorSegments.length-1 ? editorSegments[editorActiveIdx+1] : null;
-    if(prev && ns < prev.end_time) return;
-    if(next && ne > next.start_time) return;
-    seg.start_time = Math.round(ns*10)/10;
-    seg.end_time = Math.round(ne*10)/10;
+    const prev = editorActiveIdx > 0 ? editorSegments[editorActiveIdx - 1] : null;
+    const next = editorActiveIdx < editorSegments.length - 1 ? editorSegments[editorActiveIdx + 1] : null;
+    let ns = Math.round((seg.start_time + dt) * 10) / 10;
+    let ne = Math.round((seg.end_time + dt) * 10) / 10;
+    const span = Math.round((seg.end_time - seg.start_time) * 10) / 10;
+    if(ns < 0) { ns = 0; ne = Math.round((span) * 10) / 10; }
+    if(ne > dur) { ne = Math.round(dur * 10) / 10; ns = Math.round((ne - span) * 10) / 10; }
+    if(prev) prev.end_time = ns;
+    if(next) next.start_time = ne;
+    seg.start_time = ns;
+    seg.end_time = ne;
     _commitChange();
 }
+
 
 // ===== 新增唱段 =====
 function _addSegAtCursor() {
