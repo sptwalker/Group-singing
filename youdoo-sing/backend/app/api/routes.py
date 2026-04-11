@@ -398,6 +398,25 @@ async def mark_segment_completed(segment_id: str):
     return {"success": True, "data": seg}
 
 
+@router.post("/segments/{segment_id}/reopen")
+async def reopen_segment(segment_id: str):
+    """管理员重新开放已完成的唱段"""
+    seg = SEGMENTS_DB.get(segment_id)
+    if not seg:
+        raise HTTPException(status_code=404, detail="唱段不存在")
+    if seg["status"] != "completed":
+        raise HTTPException(status_code=400, detail="该唱段尚未完成，无需重开")
+
+    seg["status"] = "claimed"
+
+    song = SONGS_DB.get(seg["song_id"])
+    if song:
+        completed = sum(1 for s in song["segments"] if s["status"] == "completed")
+        song["completion"] = round(completed / len(song["segments"]) * 100, 1)
+
+    return {"success": True, "data": seg}
+
+
 @router.delete("/recordings/{recording_id}")
 async def delete_recording(recording_id: str):
     """删除录音"""

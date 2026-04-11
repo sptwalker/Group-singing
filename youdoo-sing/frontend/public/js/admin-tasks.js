@@ -57,7 +57,10 @@ async function loadTaskData(songs) {
             <td>${seg.claim_count||0} 人</td>
             <td>${(seg.recordings||[]).length} 条</td>
             <td>
-                ${seg.status!=='completed'?`<button class="btn btn-success btn-sm" onclick="markComplete('${seg.id}')">✓ 完成</button>`:''}
+                ${seg.status==='completed'
+                    ?`<button class="btn btn-outline btn-sm" onclick="reopenSegment('${seg.id}')">🔓 发布</button>`
+                    :`<button class="btn btn-success btn-sm" onclick="markComplete('${seg.id}')" ${(seg.recordings||[]).filter(r=>r.submitted).length === 0 ? 'disabled title="需有提交录音才能完成"' : ''}>✓ 完成</button>`
+                }
             </td>
         </tr>`).join('') || '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-light);">暂无数据</td></tr>';
 
@@ -87,6 +90,14 @@ async function markComplete(segId) {
     try {
         await aPost(`/segments/${segId}/complete`, new FormData());
         showToast('已标记完成', 'success');
+        renderTasks(document.getElementById('moduleContainer'));
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function reopenSegment(segId) {
+    try {
+        await aPost(`/segments/${segId}/reopen`, new FormData());
+        showToast('已重新开放', 'success');
         renderTasks(document.getElementById('moduleContainer'));
     } catch (e) { showToast(e.message, 'error'); }
 }
