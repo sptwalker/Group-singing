@@ -107,9 +107,10 @@ function playRecording(url, btn) {
     if (_taskAudio) { _taskAudio.pause(); _taskAudio = null; btn.textContent = '▶'; return; }
     const fullUrl = `${API.replace('/api', '')}${url}`;
     _taskAudio = new Audio(fullUrl);
-    _taskAudio.play();
-    btn.textContent = '⏹';
+    _taskAudio.onerror = () => { _taskAudio = null; btn.textContent = '▶'; showToast('音频加载失败'); };
     _taskAudio.onended = () => { _taskAudio = null; btn.textContent = '▶'; };
+    _taskAudio.play().catch(() => { _taskAudio = null; btn.textContent = '▶'; });
+    btn.textContent = '⏹';
 }
 
 async function selectRecording(recId) {

@@ -259,6 +259,11 @@
                 btnPause.classList.add('active');
                 btnPlay.classList.remove('active');
             }
+        } else if (audio && !isFullPlaying && audio.paused) {
+            // resume from paused preview
+            audio.play();
+            btnPlay.classList.add('active');
+            btnPause.classList.remove('active');
         }
     });
 

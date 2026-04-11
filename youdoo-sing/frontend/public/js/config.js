@@ -11,6 +11,15 @@ const AudioManager = {
         const audio = new Audio(src);
         audio.crossOrigin = 'anonymous';
         this._current = audio;
+        audio.onplay = () => {
+            if (this._onStop) this._onStop('playing');
+        };
+        audio.onpause = () => {
+            // 手动暂停或自然暂停：通知 UI 重置按钮状态（但 stop() 会先清 _onStop 再同步调用）
+            this._current = null;
+            if (this._onStop) this._onStop();
+            this._onStop = null;
+        };
         audio.onended = () => {
             this._current = null;
             if (this._onStop) this._onStop();
@@ -48,6 +57,13 @@ const AudioManager = {
             if (onTimeUpdate) onTimeUpdate(audio.currentTime, audio.duration);
         };
         audio.ontimeupdate = checkTime;
+        audio.onplay = () => {
+            if (this._onStop) this._onStop('playing');
+        };
+        audio.onpause = () => {
+            this._current = null;
+            this._onStop = null;
+        };
         audio.onended = () => {
             this._current = null;
             if (this._onStop) this._onStop();
@@ -66,9 +82,10 @@ const AudioManager = {
 
     stop() {
         if (this._current) {
-            this._current.pause();
+            this._current.onpause = null;
             this._current.ontimeupdate = null;
             this._current.onended = null;
+            this._current.pause();
             this._current = null;
         }
         if (this._onStop) {
