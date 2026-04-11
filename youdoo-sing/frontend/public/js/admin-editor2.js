@@ -1,9 +1,5 @@
 // ===== 分段编辑器 - Part2: 交互/拖拽/撤销/菜单/保存 =====
 
-if(!window.__EDITOR_PART1_OK__) {
-    console.warn('[editor2] Part1 未就绪，跳过 Part2 初始化');
-}
-
 function _getEditorDuration() {
     return editorAudio?.duration || editorWS?.getDuration?.() || editorSong?.duration || 0;
 }
@@ -13,26 +9,213 @@ function _getEditorCurrentTime() {
     return editorWS?.getCurrentTime?.() || 0;
 }
 
+// ===== 撤销/重做 =====
+function _pushHistory() {
+    editorHistoryIdx++;
+    editorHistory.length = editorHistoryIdx;
+    editorHistory.push(JSON.stringify(editorSegments));
+    if(editorHistory.length > HIST_MAX) { editorHistory.shift(); editorHistoryIdx--; }
+    _updateUndoBtn();
+}
+function _markDirty() {
+    editorDirty = true;
+    const dot = document.getElementById('edUnsaved');
+    if(dot) dot.style.display = '';
+}
+function _normalizeSegmentChain() {
+    const dur = _getEditorDuration() || 9999;
+    editorSegments.sort((a, b) => a.start_time - b.start_time);
+    editorSegments.forEach((seg, i) => {
+        const prev = i > 0 ? editorSegments[i - 1] : null;
+        seg.start_time = Math.max(0, Math.round((Number(seg.start_time) || 0) * 10) / 10);
+        seg.end_time = Math.round(Math.min(dur, Math.max(seg.start_time + SEG_MIN_DUR, Number(seg.end_time) || 0)) * 10) / 10;
+        if(prev && seg.start_time < prev.end_time) {
+            seg.start_time = prev.end_time;
+            if(seg.end_time < seg.start_time + SEG_MIN_DUR) seg.end_time = Math.min(dur, seg.start_time + SEG_MIN_DUR);
+        }
+        seg.start_time = Math.round(seg.start_time * 10) / 10;
+        seg.end_time = Math.round(seg.end_time * 10) / 10;
+        seg.index = i + 1;
+    });
+}
+function _syncAdjacentBoundary(idx, boundary, value) {
+    const dur = _getEditorDuration() || 9999;
+    const seg = editorSegments[idx];
+    if(!seg) return false;
+    let changed = false;
+    const rounded = Math.round(Math.max(0, Math.min(dur, value)) * 10) / 10;
+    if(boundary === 'start') {
+        const prev = idx > 0 ? editorSegments[idx - 1] : null;
+        let newStart = Math.max(0, Math.min(rounded, seg.end_time - SEG_MIN_DUR));
+        if(prev) {
+            newStart = Math.max(prev.end_time, newStart);
+        }
+        changed = seg.start_time !== newStart;
+        seg.start_time = newStart;
+    } else {
+        const next = idx < editorSegments.length - 1 ? editorSegments[idx + 1] : null;
+        let newEnd = Math.min(dur, Math.max(rounded, seg.start_time + SEG_MIN_DUR));
+        if(next) {
+            newEnd = Math.min(next.start_time, newEnd);
+        }
+        changed = seg.end_time !== newEnd;
+        seg.end_time = newEnd;
+    }
+    seg.start_time = Math.round(seg.start_time * 10) / 10;
+    seg.end_time = Math.round(seg.end_time * 10) / 10;
+    editorSegments.forEach((item, i) => item.index = i + 1);
+    return changed;
+}
+function edUndo() {
+    if(editorHistoryIdx <= 0) return;
+    editorHistoryIdx--;
+    editorSegments = JSON.parse(editorHistory[editorHistoryIdx]);
+    _markDirty(); _renderSegList(); _renderOverlay(); _updateUndoBtn();
+}
+
+function edRedo() {
+    if(editorHistoryIdx >= editorHistory.length-1) return;
+    editorHistoryIdx++;
+    editorSegments = JSON.parse(editorHistory[editorHistoryIdx]);
+    _markDirty(); _renderSegList(); _renderOverlay(); _updateUndoBtn();
+}
+function _updateUndoBtn() {
+    const u = document.getElementById('btnUndo'), r = document.getElementById('btnRedo');
+    if(u) u.disabled = editorHistoryIdx <= 0;
+    if(r) r.disabled = editorHistoryIdx >= editorHistory.length-1;
+}
+function _commitChange() {
+    _pushHistory();
+    _markDirty();
+    _editorSegListVersion = '';
+    _editorOverlayVersion = '';
+    _renderSegList();
+    _renderOverlay();
+}
+
+// ===== 拖拽手柄 =====
+let _dragInfo = null;
+function _startDrag(e) {
+    e.preventDefault(); e.stopPropagation();
+    const idx = +e.target.dataset.idx, side = e.target.dataset.side;
+    if(!editorWS) return;
+    const dur = editorWS.getDuration();
+    const wrap = document.getElementById('waveformWrap');
+    const ww = wrap.scrollWidth;
+    _dragInfo = { idx, side, dur, ww, startX: e.clientX, origStart: editorSegments[idx].start_time, origEnd: editorSegments[idx].end_time };
+    document.addEventListener('mousemove', _onDrag);
+    document.addEventListener('mouseup', _endDrag);
+}
+function _onDrag(e) {
+    if(!_dragInfo) return;
+    const { idx, side, dur, ww, startX, origStart, origEnd } = _dragInfo;
+    const dx = e.clientX - startX;
+    const dt = (dx / ww) * dur;
+    const seg = editorSegments[idx];
+    if(side === 'left') {
+        const newStart = Math.max(0, origStart + dt);
+        _syncAdjacentBoundary(idx, 'start', newStart);
+    } else {
+        const newEnd = Math.min(dur, origEnd + dt);
+        _syncAdjacentBoundary(idx, 'end', newEnd);
+    }
+    _renderOverlay();
+    _renderSegList();
+}
+function _endDrag() {
+    document.removeEventListener('mousemove', _onDrag);
+    document.removeEventListener('mouseup', _endDrag);
+    if(_dragInfo) {
+        const { idx, side } = _dragInfo;
+        _dragInfo = null;
+        _checkSmallGapAfterEdit(idx, side);
+        _pushHistory();
+        _markDirty();
+        _editorSegListVersion = '';
+        _editorOverlayVersion = '';
+        _renderSegList();
+        _renderOverlay();
+        _updateUndoBtn();
+    }
+}
+
+function _checkSmallGapAfterEdit(idx, side) {
+    const seg = editorSegments[idx];
+    if(!seg) return;
+    if(side === 'start' && idx > 0) {
+        const prev = editorSegments[idx - 1];
+        const gap = Math.round((seg.start_time - prev.end_time) * 10) / 10;
+        if(gap > 0.05 && gap < 1.0) {
+            showModal('空白段过小', `<p>当前空白段仅 ${gap.toFixed(1)} 秒，是否合并前后段切片？</p>`,
+                `<button class="btn btn-outline" onclick="closeModal()">保留空白</button>
+                 <button class="btn btn-primary" onclick="_mergeGap(${idx},'start')">合并</button>`);
+        }
+    }
+    if(side === 'end' && idx < editorSegments.length - 1) {
+        const next = editorSegments[idx + 1];
+        const gap = Math.round((next.start_time - seg.end_time) * 10) / 10;
+        if(gap > 0.05 && gap < 1.0) {
+            showModal('空白段过小', `<p>当前空白段仅 ${gap.toFixed(1)} 秒，是否合并前后段切片？</p>`,
+                `<button class="btn btn-outline" onclick="closeModal()">保留空白</button>
+                 <button class="btn btn-primary" onclick="_mergeGap(${idx},'end')">合并</button>`);
+        }
+    }
+}
+
+function _mergeGap(idx, side) {
+    closeModal();
+    const seg = editorSegments[idx];
+    if(!seg) return;
+    if(side === 'start' && idx > 0) {
+        const prev = editorSegments[idx - 1];
+        const mid = Math.round(((prev.end_time + seg.start_time) / 2) * 10) / 10;
+        prev.end_time = mid;
+        seg.start_time = mid;
+    }
+    if(side === 'end' && idx < editorSegments.length - 1) {
+        const next = editorSegments[idx + 1];
+        const mid = Math.round(((seg.end_time + next.start_time) / 2) * 10) / 10;
+        seg.end_time = mid;
+        next.start_time = mid;
+    }
+    _commitChange();
+}
+
+// ===== 时间输入框修改 =====
+function _onTimeInput(el) {
+    const idx = +el.dataset.idx, field = el.dataset.field;
+    let val = parseFloat(el.value);
+    if(isNaN(val) || val < 0) return;
+    const dur = _getEditorDuration() || 9999;
+    let changed = false;
+    if(field === 'start_time') {
+        changed = _syncAdjacentBoundary(idx, 'start', Math.max(0, val));
+    } else {
+        changed = _syncAdjacentBoundary(idx, 'end', Math.min(dur, val));
+    }
+    const seg = editorSegments[idx];
+    el.value = seg[field].toFixed(1);
+    if(changed) {
+        const side = field === 'start_time' ? 'start' : 'end';
+        _checkSmallGapAfterEdit(idx, side);
+        _commitChange();
+    }
+}
 
 // ===== 微调时间 (←/→) =====
 function _nudgeSegTime(dt) {
     if(editorActiveIdx < 0) return;
     const seg = editorSegments[editorActiveIdx];
     const dur = _getEditorDuration() || 9999;
-    const prev = editorActiveIdx > 0 ? editorSegments[editorActiveIdx - 1] : null;
-    const next = editorActiveIdx < editorSegments.length - 1 ? editorSegments[editorActiveIdx + 1] : null;
-    let ns = Math.round((seg.start_time + dt) * 10) / 10;
-    let ne = Math.round((seg.end_time + dt) * 10) / 10;
-    const span = Math.round((seg.end_time - seg.start_time) * 10) / 10;
-    if(ns < 0) { ns = 0; ne = Math.round((span) * 10) / 10; }
-    if(ne > dur) { ne = Math.round(dur * 10) / 10; ns = Math.round((ne - span) * 10) / 10; }
-    if(prev) prev.end_time = ns;
-    if(next) next.start_time = ne;
-    seg.start_time = ns;
-    seg.end_time = ne;
-    _commitChange();
+    let ns = seg.start_time + dt, ne = seg.end_time + dt;
+    if(ns < 0) { ne -= ns; ns = 0; }
+    if(ne > dur) { ns -= (ne-dur); ne = dur; }
+    ns = Math.round(ns * 10) / 10;
+    ne = Math.round(ne * 10) / 10;
+    let changed = _syncAdjacentBoundary(editorActiveIdx, 'start', ns);
+    changed = _syncAdjacentBoundary(editorActiveIdx, 'end', ne) || changed;
+    if(changed) _commitChange();
 }
-
 
 // ===== 新增唱段 =====
 function _addSegAtCursor() {
@@ -42,9 +225,32 @@ function _addSegAtCursor() {
 }
 function _addSegAtTime(t) {
     const dur = _getEditorDuration();
-    let start = Math.round(t*10)/10;
-    let end = Math.min(dur, Math.round((t+5)*10)/10);
-    // 检查是否与现有段重叠，找空隙
+    const target = Math.round(t * 10) / 10;
+    const idx = editorSegments.findIndex(s => target >= s.start_time && target < s.end_time);
+    if(idx >= 0) {
+        const seg = editorSegments[idx];
+        if(seg.end_time - seg.start_time < SEG_MIN_DUR * 2) { showToast('当前唱段太短，无法在此处插入新段','error'); return; }
+        const splitTime = Math.max(seg.start_time + SEG_MIN_DUR, Math.min(seg.end_time - SEG_MIN_DUR, target));
+        const newSeg = {
+            id: 'new_'+Date.now(),
+            index: 0,
+            lyrics: '',
+            start_time: splitTime,
+            end_time: seg.end_time,
+            difficulty: 'normal',
+            is_chorus: false,
+            status: 'unassigned'
+        };
+        seg.end_time = splitTime;
+        editorSegments.splice(idx + 1, 0, newSeg);
+        editorSegments.forEach((s,i) => s.index = i+1);
+        editorActiveIdx = idx + 1;
+        _commitChange();
+        showToast('已添加唱段','success');
+        return;
+    }
+    let start = target;
+    let end = Math.min(dur, Math.round((target + 5) * 10) / 10);
     for(const s of editorSegments) {
         if(start >= s.start_time && start < s.end_time) start = s.end_time;
     }
@@ -121,16 +327,17 @@ function _setCursorTime(inputId) {
 }
 function _saveSegModal(idx) {
     const seg = editorSegments[idx];
+    const startVal = parseFloat(document.getElementById('segStart').value);
+    const endVal = parseFloat(document.getElementById('segEnd').value);
     seg.lyrics = document.getElementById('segLyrics').value;
-    seg.start_time = parseFloat(document.getElementById('segStart').value) || seg.start_time;
-    seg.end_time = parseFloat(document.getElementById('segEnd').value) || seg.end_time;
     seg.difficulty = document.getElementById('segDiff').value;
     seg.is_chorus = document.getElementById('segChorus').value === 'true';
+    if(!Number.isNaN(startVal)) _syncAdjacentBoundary(idx, 'start', startVal);
+    if(!Number.isNaN(endVal)) _syncAdjacentBoundary(idx, 'end', endVal);
     if(seg.end_time - seg.start_time < SEG_MIN_DUR) {
         showToast(`唱段最短${SEG_MIN_DUR}秒`,'error'); return;
     }
-    editorSegments.sort((a,b) => a.start_time - b.start_time);
-    editorSegments.forEach((s,i) => s.index = i+1);
+    _normalizeSegmentChain();
     closeModal();
     _commitChange();
     showToast('已更新','success');
@@ -139,7 +346,7 @@ function _saveSegModal(idx) {
 // ===== 右键菜单 =====
 function _showCtx(e, idx) {
     e.preventDefault(); e.stopPropagation();
-    _selectSeg(idx);
+    _selectSeg(idx, false);
     const cm = document.getElementById('ctxMenu');
     cm.innerHTML = `
         <div class="ctx-menu-item" onclick="_playSeg(${idx});_hideCtx()">▶ 试听此段</div>
@@ -180,6 +387,7 @@ function _splitSeg(idx) {
     seg.end_time = splitTime;
     editorSegments.splice(idx+1, 0, newSeg);
     editorSegments.forEach((s,i) => s.index = i+1);
+    editorActiveIdx = idx;
     _commitChange();
     showToast('已拆分','success');
 }
@@ -218,8 +426,38 @@ async function _saveAll() {
         const res = await aGet(`/admin/songs/${editorSong.id}`);
         editorSong = res.data;
         editorSegments = JSON.parse(JSON.stringify(editorSong.segments||[]));
+        _editorSegListVersion = '';
         editorHistory = []; editorHistoryIdx = -1; _pushHistory();
         _renderSegList(); _renderOverlay();
+    } catch(e) { showToast(e.message,'error'); }
+}
+
+// ===== 重置为服务器原始方案 =====
+function _resetSegments() {
+    if(!editorSong) return;
+    showModal('重置唱段', '<p>是否重置为AI自动切分方案？当前所有未保存的修改将丢失。</p>',
+        `<button class="btn btn-outline" onclick="closeModal()">取消</button>
+         <button class="btn btn-danger" onclick="_confirmReset()">确认重置</button>`);
+}
+async function _confirmReset() {
+    closeModal();
+    try {
+        const res = await aGet(`/admin/songs/${editorSong.id}`);
+        editorSong = res.data;
+        editorSegments = JSON.parse(JSON.stringify(editorSong.segments||[]));
+        editorActiveIdx = -1;
+        _editorHighlightedIdx = -1;
+        _editorPlayingIdx = -1;
+        _editorSegListVersion = '';
+        _editorOverlayVersion = '';
+        editorDirty = false;
+        editorHistory = []; editorHistoryIdx = -1;
+        _pushHistory();
+        document.getElementById('edUnsaved').style.display = 'none';
+        _syncToolbarSegButtons();
+        _renderSegList();
+        _renderOverlay();
+        showToast('已重置为AI自动切分方案','success');
     } catch(e) { showToast(e.message,'error'); }
 }
 

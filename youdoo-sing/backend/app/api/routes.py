@@ -32,6 +32,56 @@ if os.path.exists(MUSIC_DIR):
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
+def _normalize_music_name(name: str) -> str:
+    if not name:
+        return ''
+    base, _ = os.path.splitext(name)
+    normalized = base.lower().replace(' ', '')
+    for ch in ['-', '_', '(', ')', '（', '）', '&', '＆', '·', '.', '　']:
+        normalized = normalized.replace(ch, '')
+    return normalized
+
+
+def _resolve_music_filename(expected_filename: str, title: str = '', artist: str = '') -> str:
+    if not expected_filename or not os.path.exists(MUSIC_DIR):
+        return expected_filename
+
+    exact_path = os.path.join(MUSIC_DIR, expected_filename)
+    if os.path.exists(exact_path):
+        return expected_filename
+
+    music_files = [f for f in os.listdir(MUSIC_DIR) if os.path.isfile(os.path.join(MUSIC_DIR, f))]
+    expected_norm = _normalize_music_name(expected_filename)
+    title_norm = _normalize_music_name(title)
+    artist_norm = _normalize_music_name(artist)
+
+    for candidate in music_files:
+        if _normalize_music_name(candidate) == expected_norm:
+            return candidate
+
+    ranked = []
+    for candidate in music_files:
+        candidate_norm = _normalize_music_name(candidate)
+        score = 0
+        if title_norm and title_norm in candidate_norm:
+            score += 10
+        if artist_norm and artist_norm in candidate_norm:
+            score += 6
+        if title_norm and artist_norm and candidate_norm in {title_norm + artist_norm, artist_norm + title_norm}:
+            score += 4
+        if score > 0:
+            ranked.append((score, candidate))
+
+    if ranked:
+        ranked.sort(key=lambda item: (-item[0], len(item[1])))
+        resolved = ranked[0][1]
+        print(f"[DEBUG] Resolved music file: {expected_filename} -> {resolved}")
+        return resolved
+
+    print(f"[WARN] Music file not found: {expected_filename}")
+    return expected_filename
+
+
 def init_demo_data():
     """初始化演示数据"""
     if SONGS_DB:
@@ -148,8 +198,9 @@ def init_demo_data():
 
     for song_data in demo_songs:
         song_id = str(uuid.uuid4())[:8]
-        audio_path = os.path.join(MUSIC_DIR, song_data["filename"])
-        audio_url = f"/api/music/{song_data['filename']}"
+        resolved_filename = _resolve_music_filename(song_data["filename"], song_data.get("title", ""), song_data.get("artist", ""))
+        audio_path = os.path.join(MUSIC_DIR, resolved_filename)
+        audio_url = f"/api/music/{resolved_filename}"
 
         segments = []
         for i, lyric in enumerate(song_data["lyrics_data"]):
@@ -398,25 +449,6 @@ async def mark_segment_completed(segment_id: str):
     return {"success": True, "data": seg}
 
 
-@router.post("/segments/{segment_id}/reopen")
-async def reopen_segment(segment_id: str):
-    """管理员重新开放已完成的唱段"""
-    seg = SEGMENTS_DB.get(segment_id)
-    if not seg:
-        raise HTTPException(status_code=404, detail="唱段不存在")
-    if seg["status"] != "completed":
-        raise HTTPException(status_code=400, detail="该唱段尚未完成，无需重开")
-
-    seg["status"] = "claimed"
-
-    song = SONGS_DB.get(seg["song_id"])
-    if song:
-        completed = sum(1 for s in song["segments"] if s["status"] == "completed")
-        song["completion"] = round(completed / len(song["segments"]) * 100, 1)
-
-    return {"success": True, "data": seg}
-
-
 @router.delete("/recordings/{recording_id}")
 async def delete_recording(recording_id: str):
     """删除录音"""
@@ -635,24 +667,44 @@ async def admin_delete_segment(segment_id: str, request: Request):
 
 @router.put("/admin/songs/{song_id}/segments/batch")
 async def admin_batch_update_segments(song_id: str, request: Request):
-    """批量更新唱段（用于拖拽调整后保存）"""
+    """批量替换唱段（前端方案原样写入）"""
     verify_admin(request)
     song = SONGS_DB.get(song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
     body = await request.json()
     segments_data = body.get("segments", [])
-    for seg_data in segments_data:
-        seg = SEGMENTS_DB.get(seg_data.get("id"))
-        if seg:
-            for key in ["start_time", "end_time", "lyrics", "difficulty", "is_chorus"]:
-                if key in seg_data:
-                    seg[key] = seg_data[key]
-    # 重新排序
-    song["segments"].sort(key=lambda s: s["start_time"])
-    for i, s in enumerate(song["segments"]):
-        s["index"] = i + 1
-    return {"success": True, "data": song["segments"]}
+
+    # 清除该歌曲所有旧段
+    for old_seg in song["segments"]:
+        SEGMENTS_DB.pop(old_seg["id"], None)
+
+    # 用前端数据原样重建
+    new_segments = []
+    for i, seg_data in enumerate(segments_data):
+        new_id = f"{song_id}-{uuid.uuid4().hex[:6]}"
+        while new_id in SEGMENTS_DB:
+            new_id = f"{song_id}-{uuid.uuid4().hex[:6]}"
+        seg = {
+            "id": new_id,
+            "song_id": song_id,
+            "index": i + 1,
+            "start_time": seg_data.get("start_time", 0),
+            "end_time": seg_data.get("end_time", 0),
+            "lyrics": seg_data.get("lyrics", ""),
+            "difficulty": seg_data.get("difficulty", "normal"),
+            "is_chorus": seg_data.get("is_chorus", False),
+            "status": seg_data.get("status", "unassigned"),
+            "claim_count": 0,
+            "submit_count": 0,
+            "claims": [],
+        }
+        SEGMENTS_DB[new_id] = seg
+        new_segments.append(seg)
+
+    song["segments"] = new_segments
+    song["segment_count"] = len(new_segments)
+    return {"success": True, "data": new_segments}
 
 
 # ============ 管理员 - 录音管理 ============
