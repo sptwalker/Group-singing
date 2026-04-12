@@ -36,6 +36,33 @@
     let _micStream = null;
     let _recPreparing = false;
 
+    // ===== 升降调控制 =====
+    const pitchLabel = document.getElementById('pitchLabel');
+    const btnPitchDown = document.getElementById('btnPitchDown');
+    const btnPitchUp = document.getElementById('btnPitchUp');
+
+    function updatePitchLabel() {
+        const val = AudioManager.getPitch();
+        if (val === 0) {
+            pitchLabel.textContent = '原调';
+            pitchLabel.classList.remove('pitch-shifted');
+        } else {
+            pitchLabel.textContent = (val > 0 ? '+' : '') + val + ' 调';
+            pitchLabel.classList.add('pitch-shifted');
+        }
+    }
+    btnPitchDown.addEventListener('click', () => {
+        if (isRecording || _recPreparing) return;
+        AudioManager.setPitch(AudioManager.getPitch() - 1);
+        updatePitchLabel();
+    });
+    btnPitchUp.addEventListener('click', () => {
+        if (isRecording || _recPreparing) return;
+        AudioManager.setPitch(AudioManager.getPitch() + 1);
+        updatePitchLabel();
+    });
+    updatePitchLabel();
+
     // 初始化
     recSongName.textContent = song.title;
     recSegInfo.textContent = `#${segment.index} · ${segment.difficulty === 'easy' ? '简单' : segment.difficulty === 'normal' ? '普通' : '困难'}${segment.is_chorus ? ' · 合唱段' : ''}`;
@@ -128,12 +155,14 @@
 
     function _applyMtvScan(line, progress, isMySeg) {
         const pct = (progress * 100).toFixed(1);
-        line.classList.add('mtv-scan');
         const hiColor = isMySeg ? '#fbbf24' : 'rgba(255,255,255,0.85)';
         const loColor = isMySeg ? 'rgba(251,191,36,0.3)' : 'rgba(255,255,255,0.2)';
+        // 先设透明文字色，防止 .active 颜色闪烁
+        line.style.webkitTextFillColor = 'transparent';
         line.style.background = `linear-gradient(90deg, ${hiColor} ${pct}%, ${loColor} ${pct}%)`;
         line.style.webkitBackgroundClip = 'text';
         line.style.backgroundClip = 'text';
+        line.classList.add('mtv-scan');
     }
 
     function _clearMtvScan(line) {
@@ -153,17 +182,20 @@
             const isCurrent = currentTime >= seg.start_time && currentTime < seg.end_time;
             const isPast = currentTime >= seg.end_time;
             const isMySeg = seg.id === segment.id;
-            line.classList.toggle('active', isCurrent);
 
             if (isCurrent) {
                 const duration = seg.end_time - seg.start_time;
                 const elapsed = currentTime - seg.start_time;
                 const progress = Math.min(1, Math.max(0, elapsed / duration));
+                // 先应用 mtv-scan（设置 text-fill-color: transparent），再加 active，避免闪烁
                 _applyMtvScan(line, progress, isMySeg);
+                line.classList.add('active');
                 line.scrollIntoView({ behavior: 'smooth', block: 'center' });
             } else if (isPast) {
                 _applyMtvScan(line, 1, isMySeg);
+                line.classList.remove('active');
             } else {
+                line.classList.remove('active');
                 _clearMtvScan(line);
             }
         });
@@ -171,7 +203,7 @@
 
     function clearLyricsHighlight() {
         lyricsSection.querySelectorAll('.lyric-line').forEach(line => {
-            line.classList.remove('active', 'recording-active');
+            line.classList.remove('active', 'recording-active', 'singing-now');
             _clearMtvScan(line);
         });
     }
@@ -241,16 +273,27 @@
 
         // 3. 播放前奏 + 倒计时 + 录音
         const audioUrl = `${API_BASE.replace('/api', '')}${song.audio_url}`;
-        // 从前一段歌词开始播放
+        // 计算播放起始点：从前一段歌词开始，但最多提前5秒
         const prevSegIdx = Math.max(0, mySegIdx - 1);
-        const introStart = allSegments[prevSegIdx].start_time;
-        const actualIntro = segment.start_time - introStart;
+        const prevSegStart = allSegments[prevSegIdx].start_time;
+        const gapToPrev = segment.start_time - prevSegStart;
+        // 统一逻辑：如果是第一段、前段距离<1秒、或前段距离>5秒，都从5秒前开始
+        const maxLeadIn = 5;
+        let playStart;
+        if (mySegIdx === 0 || gapToPrev < 1 || gapToPrev > maxLeadIn) {
+            playStart = Math.max(0, segment.start_time - maxLeadIn);
+        } else {
+            playStart = prevSegStart;
+        }
+        const leadTime = segment.start_time - playStart;
 
         _stopHandled = false;
         _recCompleted = false;
         showArrowIndicators();
 
-        AudioManager.playRange(audioUrl, introStart, segment.end_time, () => {
+        waveLabel.textContent = leadTime > 3 ? '前奏准备' : '请准备';
+
+        AudioManager.playRange(audioUrl, playStart, segment.end_time, () => {
             _stopSyncLoop();
             if (isRecording || _recPreparing) {
                 stopRecording(false);
@@ -268,7 +311,7 @@
 
             // 倒计时显示
             const timeToSing = segment.start_time - curTime;
-            if (timeToSing > 0 && timeToSing <= actualIntro + 0.5) {
+            if (timeToSing > 0) {
                 const cd = Math.ceil(timeToSing);
                 waveCd.textContent = cd > 0 ? cd : '';
             } else {
@@ -284,6 +327,9 @@
                 btnRecord.disabled = false;
                 btnRecord.className = 'btn-record-ctrl btn-record recording';
                 btnRecord.textContent = '⏹ 停止录音';
+                // 演唱歌词变亮
+                const myLine = lyricsSection.querySelector('.my-singing-line');
+                if (myLine) myLine.classList.add('singing-now');
                 startRecordingWithStream();
             }
         });
@@ -312,27 +358,20 @@
     }
 
     // 箭头指示器
+    const _arrowEl = document.querySelector('.lyrics-arrow-left');
     function showArrowIndicators() {
-        document.querySelectorAll('.lyrics-arrow').forEach(el => {
-            el.style.display = 'flex';
-        });
+        if (_arrowEl) _arrowEl.style.display = 'block';
     }
     function hideArrowIndicators() {
-        document.querySelectorAll('.lyrics-arrow').forEach(el => {
-            el.style.display = 'none';
-            el.classList.remove('arrow-bold');
-        });
+        if (_arrowEl) {
+            _arrowEl.style.display = 'none';
+            _arrowEl.classList.remove('arrow-bold');
+        }
     }
     function updateArrowIndicators(curTime) {
-        const arrows = document.querySelectorAll('.lyrics-arrow');
+        if (!_arrowEl) return;
         const isInMySegment = curTime >= segment.start_time && curTime <= segment.end_time;
-        arrows.forEach(el => {
-            if (isInMySegment) {
-                el.classList.add('arrow-bold');
-            } else {
-                el.classList.remove('arrow-bold');
-            }
-        });
+        _arrowEl.classList.toggle('arrow-bold', isInMySegment);
 
         // 箭头跟随当前高亮歌词行位置
         const activeLine = lyricsSection.querySelector('.lyric-line.active');
@@ -342,25 +381,24 @@
                 const containerRect = container.getBoundingClientRect();
                 const lineRect = activeLine.getBoundingClientRect();
                 const relativeTop = lineRect.top - containerRect.top + lineRect.height / 2;
-                arrows.forEach(el => {
-                    el.style.top = relativeTop + 'px';
-                    el.style.transform = 'translateY(-50%)';
-                });
+                _arrowEl.style.top = relativeTop + 'px';
             }
         }
     }
 
     // 使用预获取的麦克风流启动录音（同步调用，无异步延迟）
     function startRecordingWithStream() {
-        if (!_micStream) {
-            console.error('[录音] 没有可用的麦克风流');
+        // 优先使用处理后的流（降噪+美化），降级到原始麦克风流
+        const recStream = _processedStream || _micStream;
+        if (!recStream) {
+            console.error('[录音] 没有可用的音频流');
             showToast('麦克风未就绪');
             return;
         }
         // 检查 track 是否还活着
-        const tracks = _micStream.getAudioTracks();
+        const tracks = recStream.getAudioTracks();
         if (tracks.length === 0 || tracks[0].readyState !== 'live') {
-            console.error('[录音] 麦克风 track 已失效:', tracks.length > 0 ? tracks[0].readyState : 'no tracks');
+            console.error('[录音] 音频 track 已失效:', tracks.length > 0 ? tracks[0].readyState : 'no tracks');
             showToast('麦克风连接丢失，请重试');
             return;
         }
@@ -373,10 +411,11 @@
                     mimeType = '';
                 }
             }
-            console.log('[录音] 使用 mimeType:', mimeType || '浏览器默认');
+            console.log('[录音] 使用 mimeType:', mimeType || '浏览器默认',
+                        '| 音频处理:', _processedStream ? '降噪+美化' : '原始');
 
             const options = mimeType ? { mimeType } : {};
-            mediaRecorder = new MediaRecorder(_micStream, options);
+            mediaRecorder = new MediaRecorder(recStream, options);
             recordedChunks = [];
 
             mediaRecorder.ondataavailable = (e) => {
@@ -485,6 +524,91 @@
     // ===== 实时波形可视化 =====
     let _audioCtx = null, _analyser = null, _waveRAF = 0, _sourceNode = null;
 
+    // ===== 音频处理引擎（降噪 + 人声美化） =====
+    let _processedStream = null;  // 处理后的 MediaStream（给 MediaRecorder 用）
+    let _procNodes = [];          // 处理链节点引用，用于断开
+
+    /**
+     * 构建音频处理链：
+     * micSource → highpass(降噪) → lowpass(去高频噪声) → compressor(动态压缩) → midBoost(人声EQ) → presenceBoost(亮度) → destination
+     * 同时分支到 analyser 做波形可视化
+     */
+    function buildAudioProcessingChain(stream) {
+        if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        const source = _audioCtx.createMediaStreamSource(stream);
+
+        // 1. 高通滤波 — 去除 80Hz 以下低频噪声（空调、风扇、嗡嗡声）
+        const highpass = _audioCtx.createBiquadFilter();
+        highpass.type = 'highpass';
+        highpass.frequency.value = 80;
+        highpass.Q.value = 0.7;
+
+        // 2. 低通滤波 — 去除 12kHz 以上高频噪声（电流声、嘶嘶声）
+        const lowpass = _audioCtx.createBiquadFilter();
+        lowpass.type = 'lowpass';
+        lowpass.frequency.value = 12000;
+        lowpass.Q.value = 0.7;
+
+        // 3. 动态压缩器 — 平衡音量，防止爆音，让声音更饱满
+        const compressor = _audioCtx.createDynamicsCompressor();
+        compressor.threshold.value = -24;   // 压缩阈值
+        compressor.knee.value = 12;         // 柔和过渡
+        compressor.ratio.value = 4;         // 压缩比
+        compressor.attack.value = 0.003;    // 快速响应
+        compressor.release.value = 0.15;    // 适中释放
+
+        // 4. 中频提升 — 增强人声核心频段（2-4kHz），让声音更清晰
+        const midBoost = _audioCtx.createBiquadFilter();
+        midBoost.type = 'peaking';
+        midBoost.frequency.value = 3000;
+        midBoost.Q.value = 1.0;
+        midBoost.gain.value = 3;  // +3dB
+
+        // 5. 临场感提升 — 轻微提升 5kHz，增加声音亮度
+        const presenceBoost = _audioCtx.createBiquadFilter();
+        presenceBoost.type = 'peaking';
+        presenceBoost.frequency.value = 5000;
+        presenceBoost.Q.value = 1.0;
+        presenceBoost.gain.value = 2;  // +2dB
+
+        // 6. 增益补偿 — 补偿处理链的音量损失
+        const makeupGain = _audioCtx.createGain();
+        makeupGain.gain.value = 1.3;
+
+        // 连接处理链
+        source.connect(highpass);
+        highpass.connect(lowpass);
+        lowpass.connect(compressor);
+        compressor.connect(midBoost);
+        midBoost.connect(presenceBoost);
+        presenceBoost.connect(makeupGain);
+
+        // 输出到 MediaStreamDestination（给 MediaRecorder）
+        const destination = _audioCtx.createMediaStreamDestination();
+        makeupGain.connect(destination);
+
+        // 分支到 analyser（波形可视化）
+        _analyser = _audioCtx.createAnalyser();
+        _analyser.fftSize = 256;
+        makeupGain.connect(_analyser);
+
+        _sourceNode = source;
+        _processedStream = destination.stream;
+        _procNodes = [source, highpass, lowpass, compressor, midBoost, presenceBoost, makeupGain, destination];
+
+        console.log('[音频处理] 降噪+美化处理链已建立');
+        return { analyser: _analyser, processedStream: _processedStream };
+    }
+
+    function destroyAudioProcessingChain() {
+        _procNodes.forEach(node => { try { node.disconnect(); } catch(e){} });
+        _procNodes = [];
+        _processedStream = null;
+        _sourceNode = null;
+        _analyser = null;
+    }
+
     function startLiveWave(stream) {
         const panel = document.getElementById('liveWavePanel');
         const canvas = document.getElementById('liveWaveCanvas');
@@ -495,11 +619,8 @@
         const ctx = canvas.getContext('2d');
 
         try {
-            if(!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            _analyser = _audioCtx.createAnalyser();
-            _analyser.fftSize = 256;
-            _sourceNode = _audioCtx.createMediaStreamSource(stream);
-            _sourceNode.connect(_analyser);
+            // 构建完整音频处理链（降噪+美化+波形分析）
+            buildAudioProcessingChain(stream);
         } catch(e) {
             console.warn('[波形] 初始化失败:', e);
             return;
@@ -537,8 +658,7 @@
 
     function stopLiveWave() {
         if(_waveRAF) { cancelAnimationFrame(_waveRAF); _waveRAF = 0; }
-        if(_sourceNode) { try { _sourceNode.disconnect(); } catch(e){} _sourceNode = null; }
-        _analyser = null;
+        destroyAudioProcessingChain();
         const panel = document.getElementById('liveWavePanel');
         if(panel) panel.style.display = 'none';
     }
@@ -553,11 +673,11 @@
             const isPast = currentTime >= seg.end_time;
 
             if (isMySeg) {
-                line.classList.add('active', 'recording-active');
                 const duration = segment.end_time - segment.start_time;
                 const elapsed = currentTime - segment.start_time;
                 const progress = Math.min(1, Math.max(0, elapsed / duration));
                 _applyMtvScan(line, progress, true);
+                line.classList.add('active', 'recording-active');
                 line.scrollIntoView({ behavior: 'smooth', block: 'center' });
             } else if (isPast) {
                 line.classList.remove('active', 'recording-active');
@@ -569,24 +689,431 @@
         });
     }
 
+    // ===== 录音音频分析评分系统 =====
+    async function analyzeRecording(blob) {
+        try {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const arrayBuffer = await blob.arrayBuffer();
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            const channelData = audioBuffer.getChannelData(0);
+            const sampleRate = audioBuffer.sampleRate;
+            const duration = audioBuffer.duration;
+
+            // 1. 音量分析 — 计算 RMS 和动态范围
+            const volumeAnalysis = analyzeVolume(channelData, sampleRate);
+            // 2. 音准分析 — 基频稳定性
+            const pitchAnalysis = analyzePitch(channelData, sampleRate);
+            // 3. 节奏分析 — 能量包络的规律性
+            const rhythmAnalysis = analyzeRhythm(channelData, sampleRate);
+            // 4. 音色分析 — 频谱丰富度
+            const toneAnalysis = analyzeTone(channelData, sampleRate);
+
+            // 综合评分（加权平均）
+            const weights = { volume: 0.2, pitch: 0.35, rhythm: 0.25, tone: 0.2 };
+            const composite = Math.round(
+                volumeAnalysis.score * weights.volume +
+                pitchAnalysis.score * weights.pitch +
+                rhythmAnalysis.score * weights.rhythm +
+                toneAnalysis.score * weights.tone
+            );
+            // 映射到1-5星
+            const starScore = Math.max(1, Math.min(5, Math.round(composite / 20)));
+
+            audioCtx.close();
+
+            return {
+                star: starScore,
+                composite: composite,
+                dimensions: {
+                    volume: { score: volumeAnalysis.score, label: '音量', icon: '🔊', detail: volumeAnalysis.detail },
+                    pitch: { score: pitchAnalysis.score, label: '音准', icon: '🎵', detail: pitchAnalysis.detail },
+                    rhythm: { score: rhythmAnalysis.score, label: '节奏', icon: '🥁', detail: rhythmAnalysis.detail },
+                    tone: { score: toneAnalysis.score, label: '音色', icon: '🎶', detail: toneAnalysis.detail },
+                },
+                duration: Math.round(duration * 10) / 10,
+            };
+        } catch (e) {
+            console.error('[评分] 音频分析失败:', e);
+            return null;
+        }
+    }
+
+    function analyzeVolume(data, sampleRate) {
+        // 将音频分成小帧计算每帧 RMS
+        const frameSize = Math.floor(sampleRate * 0.05); // 50ms 帧
+        const frames = [];
+        for (let i = 0; i < data.length - frameSize; i += frameSize) {
+            let sum = 0;
+            for (let j = 0; j < frameSize; j++) sum += data[i + j] * data[i + j];
+            frames.push(Math.sqrt(sum / frameSize));
+        }
+        if (frames.length === 0) return { score: 0, detail: '无音频数据' };
+
+        // 整体 RMS
+        const avgRMS = frames.reduce((a, b) => a + b, 0) / frames.length;
+        // 有效帧（排除静音）
+        const threshold = avgRMS * 0.15;
+        const activeFrames = frames.filter(f => f > threshold);
+        const activeRatio = activeFrames.length / frames.length;
+
+        // 动态范围（有效帧的标准差 / 均值 → 越小越稳定）
+        let score = 0;
+        let detail = '';
+        if (activeFrames.length < 3) {
+            score = 10;
+            detail = '音量过低';
+        } else {
+            const mean = activeFrames.reduce((a, b) => a + b, 0) / activeFrames.length;
+            const variance = activeFrames.reduce((a, b) => a + (b - mean) ** 2, 0) / activeFrames.length;
+            const cv = Math.sqrt(variance) / mean; // 变异系数
+
+            // 音量适中得分（RMS 在 0.05~0.3 范围最佳）
+            let levelScore;
+            if (avgRMS < 0.01) levelScore = 20;
+            else if (avgRMS < 0.03) levelScore = 50;
+            else if (avgRMS < 0.05) levelScore = 70;
+            else if (avgRMS <= 0.35) levelScore = 100;
+            else if (avgRMS <= 0.5) levelScore = 80;
+            else levelScore = 60;
+
+            // 稳定性得分（cv 越小越好）
+            let stabilityScore;
+            if (cv < 0.3) stabilityScore = 100;
+            else if (cv < 0.5) stabilityScore = 80;
+            else if (cv < 0.8) stabilityScore = 60;
+            else stabilityScore = 40;
+
+            // 演唱覆盖率（有声帧占比）
+            let coverageScore = Math.min(100, activeRatio * 120);
+
+            score = Math.round(levelScore * 0.35 + stabilityScore * 0.35 + coverageScore * 0.3);
+
+            if (avgRMS < 0.03) detail = '音量偏低，可靠近麦克风';
+            else if (avgRMS > 0.5) detail = '音量偏大，注意控制气息';
+            else if (cv > 0.6) detail = '音量起伏较大';
+            else if (activeRatio < 0.4) detail = '演唱间断较多';
+            else detail = '音量控制良好';
+        }
+        return { score: Math.min(100, Math.max(0, score)), detail };
+    }
+
+    function analyzePitch(data, sampleRate) {
+        // 使用自相关法检测基频
+        const frameSize = Math.floor(sampleRate * 0.04); // 40ms
+        const hopSize = Math.floor(sampleRate * 0.02); // 20ms hop
+        const pitches = [];
+
+        for (let start = 0; start < data.length - frameSize; start += hopSize) {
+            const frame = data.slice(start, start + frameSize);
+            // 检查帧能量是否足够
+            let energy = 0;
+            for (let i = 0; i < frame.length; i++) energy += frame[i] * frame[i];
+            energy = Math.sqrt(energy / frame.length);
+            if (energy < 0.02) continue; // 静音帧跳过
+
+            const pitch = detectPitchACF(frame, sampleRate);
+            if (pitch > 60 && pitch < 1200) pitches.push(pitch); // 人声范围
+        }
+
+        if (pitches.length < 5) {
+            return { score: 30, detail: '未检测到足够的音高信息' };
+        }
+
+        // 将音高转为 MIDI 半音（对数域），分析稳定性
+        const midiNotes = pitches.map(f => 12 * Math.log2(f / 440) + 69);
+
+        // 音高跳变分析：相邻帧的半音差
+        const intervals = [];
+        for (let i = 1; i < midiNotes.length; i++) {
+            intervals.push(Math.abs(midiNotes[i] - midiNotes[i - 1]));
+        }
+        const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+        // 大跳变比例（>3半音）
+        const bigJumps = intervals.filter(d => d > 3).length / intervals.length;
+
+        // 音高范围
+        const sortedMidi = [...midiNotes].sort((a, b) => a - b);
+        const range = sortedMidi[Math.floor(sortedMidi.length * 0.95)] - sortedMidi[Math.floor(sortedMidi.length * 0.05)];
+
+        let score = 0;
+        // 平均跳变越小越稳定（歌唱中合理范围 0.3~1.5 半音）
+        if (avgInterval < 0.5) score += 40;
+        else if (avgInterval < 1.0) score += 35;
+        else if (avgInterval < 1.5) score += 28;
+        else if (avgInterval < 2.5) score += 20;
+        else score += 10;
+
+        // 大跳变比例
+        if (bigJumps < 0.05) score += 30;
+        else if (bigJumps < 0.1) score += 25;
+        else if (bigJumps < 0.2) score += 18;
+        else score += 8;
+
+        // 音域范围（合理范围 5~20 半音）
+        if (range >= 5 && range <= 24) score += 30;
+        else if (range >= 3 && range <= 30) score += 22;
+        else score += 12;
+
+        let detail;
+        if (score >= 80) detail = '音准稳定，表现出色';
+        else if (score >= 60) detail = '音准较好，偶有偏差';
+        else if (score >= 40) detail = '音准有波动，可多练习';
+        else detail = '音准需要加强练习';
+
+        return { score: Math.min(100, Math.max(0, score)), detail };
+    }
+
+    function detectPitchACF(frame, sampleRate) {
+        // 自相关法基频检测
+        const n = frame.length;
+        const minLag = Math.floor(sampleRate / 1200); // 最高 1200Hz
+        const maxLag = Math.floor(sampleRate / 60);   // 最低 60Hz
+        let bestLag = 0, bestCorr = -1;
+
+        for (let lag = minLag; lag <= Math.min(maxLag, n - 1); lag++) {
+            let corr = 0, norm1 = 0, norm2 = 0;
+            for (let i = 0; i < n - lag; i++) {
+                corr += frame[i] * frame[i + lag];
+                norm1 += frame[i] * frame[i];
+                norm2 += frame[i + lag] * frame[i + lag];
+            }
+            const normFactor = Math.sqrt(norm1 * norm2);
+            if (normFactor > 0) corr /= normFactor;
+            if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
+        }
+        if (bestCorr < 0.4 || bestLag === 0) return 0; // 不够可信
+        return sampleRate / bestLag;
+    }
+
+    function analyzeRhythm(data, sampleRate) {
+        // 计算能量包络，分析节奏规律性
+        const frameSize = Math.floor(sampleRate * 0.03); // 30ms
+        const envelope = [];
+        for (let i = 0; i < data.length - frameSize; i += frameSize) {
+            let sum = 0;
+            for (let j = 0; j < frameSize; j++) sum += Math.abs(data[i + j]);
+            envelope.push(sum / frameSize);
+        }
+        if (envelope.length < 10) return { score: 50, detail: '片段过短' };
+
+        // 计算能量变化的一阶差分
+        const diffs = [];
+        for (let i = 1; i < envelope.length; i++) {
+            diffs.push(Math.abs(envelope[i] - envelope[i - 1]));
+        }
+        const avgDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+
+        // 检测onset（能量突增点）
+        const threshold = avgDiff * 2;
+        const onsets = [];
+        for (let i = 0; i < diffs.length; i++) {
+            if (diffs[i] > threshold) onsets.push(i);
+        }
+
+        // 分析onset间隔的规律性
+        let rhythmScore = 50;
+        let detail = '';
+        if (onsets.length >= 3) {
+            const intervals = [];
+            for (let i = 1; i < onsets.length; i++) {
+                intervals.push(onsets[i] - onsets[i - 1]);
+            }
+            const meanInt = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+            const varInt = intervals.reduce((a, b) => a + (b - meanInt) ** 2, 0) / intervals.length;
+            const cvInt = meanInt > 0 ? Math.sqrt(varInt) / meanInt : 1;
+
+            // 节奏规律性（cv 越小越规律）
+            if (cvInt < 0.3) rhythmScore = 95;
+            else if (cvInt < 0.5) rhythmScore = 80;
+            else if (cvInt < 0.7) rhythmScore = 65;
+            else if (cvInt < 1.0) rhythmScore = 50;
+            else rhythmScore = 35;
+
+            // 节奏密度适中加分（不太快不太慢）
+            const avgIntervalMs = meanInt * 30; // 30ms per frame
+            if (avgIntervalMs >= 200 && avgIntervalMs <= 800) rhythmScore = Math.min(100, rhythmScore + 5);
+
+            if (rhythmScore >= 80) detail = '节奏稳定，把握准确';
+            else if (rhythmScore >= 60) detail = '节奏感较好';
+            else if (rhythmScore >= 45) detail = '节奏有些不稳';
+            else detail = '节奏需要加强';
+        } else {
+            rhythmScore = 55;
+            detail = '节奏点较少，演唱较平';
+        }
+        return { score: Math.min(100, Math.max(0, rhythmScore)), detail };
+    }
+
+    function analyzeTone(data, sampleRate) {
+        // 频谱分析 — 使用简化方法计算频谱特征
+        const frameSize = 1024;
+        const spectra = [];
+
+        for (let start = 0; start + frameSize < data.length; start += frameSize * 2) {
+            const frame = data.slice(start, start + frameSize);
+            let energy = 0;
+            for (let i = 0; i < frame.length; i++) energy += frame[i] * frame[i];
+            if (Math.sqrt(energy / frame.length) < 0.015) continue;
+
+            // 使用自相关频谱估计（比DFT快得多）
+            const magnitudes = [];
+            const bins = 128;
+            for (let k = 0; k < bins; k++) {
+                let corr = 0;
+                const lag = k;
+                for (let n = 0; n < frameSize - lag; n++) {
+                    corr += frame[n] * frame[n + lag];
+                }
+                magnitudes.push(Math.abs(corr));
+            }
+            spectra.push(magnitudes);
+        }
+
+        if (spectra.length === 0) return { score: 40, detail: '音频信号不足' };
+
+        // 平均频谱
+        const avgSpectrum = new Array(spectra[0].length).fill(0);
+        spectra.forEach(s => s.forEach((v, i) => avgSpectrum[i] += v));
+        avgSpectrum.forEach((v, i) => avgSpectrum[i] = v / spectra.length);
+
+        // 自相关衰减率（谐波丰富度指标）
+        const peak = avgSpectrum[0] || 1;
+        let harmonicPeaks = 0;
+        for (let i = 2; i < avgSpectrum.length - 1; i++) {
+            if (avgSpectrum[i] > avgSpectrum[i-1] && avgSpectrum[i] > avgSpectrum[i+1] && avgSpectrum[i] > peak * 0.1) {
+                harmonicPeaks++;
+            }
+        }
+
+        // 衰减速度（快速衰减=噪声少）
+        const midEnergy = avgSpectrum.slice(30, 60).reduce((a, b) => a + b, 0);
+        const earlyEnergy = avgSpectrum.slice(1, 15).reduce((a, b) => a + b, 0);
+        const decayRatio = earlyEnergy > 0 ? midEnergy / earlyEnergy : 1;
+
+        // 评分
+        let score = 50;
+        // 谐波峰越多 → 音色越丰富
+        if (harmonicPeaks >= 5) score += 25;
+        else if (harmonicPeaks >= 3) score += 20;
+        else if (harmonicPeaks >= 1) score += 12;
+        else score += 5;
+
+        // 衰减比适中（不太快也不太慢）
+        if (decayRatio >= 0.05 && decayRatio <= 0.4) score += 25;
+        else if (decayRatio >= 0.02 && decayRatio <= 0.6) score += 18;
+        else score += 8;
+
+        let detail;
+        if (score >= 80) detail = '音色饱满清亮';
+        else if (score >= 60) detail = '音色较好';
+        else if (score >= 45) detail = '音色表现一般';
+        else detail = '可注意发声技巧';
+
+        return { score: Math.min(100, Math.max(0, score)), detail };
+    }
+
+    // ===== 评分结果弹窗 =====
+    function showScorePanel(scoreResult) {
+        // 移除已有面板
+        const old = document.getElementById('scorePanelOverlay');
+        if (old) old.remove();
+
+        const dims = scoreResult.dimensions;
+        const dimKeys = ['pitch', 'volume', 'rhythm', 'tone'];
+
+        let starsHtml = '';
+        for (let i = 1; i <= 5; i++) {
+            starsHtml += `<span class="score-star ${i <= scoreResult.star ? 'filled' : ''}" style="animation-delay:${i * 0.12}s">★</span>`;
+        }
+
+        let dimsHtml = dimKeys.map(key => {
+            const d = dims[key];
+            const barColor = d.score >= 80 ? '#10b981' : d.score >= 60 ? '#f59e0b' : d.score >= 40 ? '#f97316' : '#ef4444';
+            return `
+                <div class="score-dim-row">
+                    <span class="score-dim-icon">${d.icon}</span>
+                    <span class="score-dim-label">${d.label}</span>
+                    <div class="score-dim-bar-bg">
+                        <div class="score-dim-bar" style="width:0%;background:${barColor};" data-target="${d.score}"></div>
+                    </div>
+                    <span class="score-dim-val">${d.score}</span>
+                    <span class="score-dim-detail">${d.detail}</span>
+                </div>`;
+        }).join('');
+
+        const overlay = document.createElement('div');
+        overlay.id = 'scorePanelOverlay';
+        overlay.className = 'score-panel-overlay';
+        overlay.innerHTML = `
+            <div class="score-panel">
+                <div class="score-panel-title">演唱评分</div>
+                <div class="score-stars-row">${starsHtml}</div>
+                <div class="score-composite">综合得分 <strong>${scoreResult.composite}</strong><span>/100</span></div>
+                <div class="score-dims">${dimsHtml}</div>
+                <button class="score-panel-close" id="scoreCloseBtn">确定</button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        // 动画：渐入 + 条形图动画
+        requestAnimationFrame(() => {
+            overlay.classList.add('show');
+            setTimeout(() => {
+                overlay.querySelectorAll('.score-dim-bar').forEach(bar => {
+                    bar.style.width = bar.dataset.target + '%';
+                });
+            }, 300);
+        });
+
+        document.getElementById('scoreCloseBtn').addEventListener('click', () => {
+            overlay.classList.remove('show');
+            setTimeout(() => overlay.remove(), 300);
+        });
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                overlay.classList.remove('show');
+                setTimeout(() => overlay.remove(), 300);
+            }
+        });
+    }
+
     function onRecordingComplete(blob) {
         console.log('[录音完成] blob:', blob.size, 'bytes, type:', blob.type);
-        const score = Math.floor(Math.random() * 3) + 3;
         const url = URL.createObjectURL(blob);
-        console.log('[录音完成] blobURL:', url);
         const now = new Date();
         const timeStr = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+
+        // 先创建录音记录（评分中状态）
         const rec = {
             index: myRecordings.length + 1,
             blob: blob,
             url: url,
-            score: score,
+            score: 0,
+            scoreResult: null,
             time: timeStr,
             id: null,
         };
+        const recIdx = myRecordings.length;
         myRecordings.push(rec);
         renderMyRecordings();
-        showToast('录音完成！');
+        showToast('录音完成，正在分析...');
+
+        // 异步分析评分
+        analyzeRecording(blob).then(result => {
+            if (result) {
+                rec.score = result.star;
+                rec.scoreResult = result;
+                console.log('[评分]', result);
+                renderMyRecordings();
+                showScorePanel(result);
+            } else {
+                // 分析失败，给默认分
+                rec.score = 3;
+                rec.scoreResult = null;
+                renderMyRecordings();
+                showToast('评分分析失败，已给予默认评分');
+            }
+        });
     }
 
     function renderMyRecordings() {
@@ -606,15 +1133,20 @@
 
         myRecList.innerHTML = myRecordings.map((rec, i) => {
             let stars = '';
-            for (let s = 1; s <= 5; s++) {
-                stars += `<span class="star ${s <= rec.score ? 'filled' : ''}">★</span>`;
+            if (rec.score === 0 && !rec.scoreResult) {
+                stars = '<span class="score-analyzing">分析中...</span>';
+            } else {
+                for (let s = 1; s <= 5; s++) {
+                    stars += `<span class="star ${s <= rec.score ? 'filled' : ''}">★</span>`;
+                }
             }
+            const detailBtn = rec.scoreResult ? `<button class="btn-score-detail" data-rec-idx="${i}" title="查看详细评分">📊</button>` : '';
             return `
                 <div class="my-rec-card ${i === selectedRecIndex ? 'selected' : ''}" data-index="${i}">
                     <span class="my-rec-num">#${rec.index}</span>
                     <span class="my-rec-time">${rec.time || ''}</span>
                     <div class="my-rec-wave" id="recWave${i}"></div>
-                    <div class="my-rec-score">${stars}</div>
+                    <div class="my-rec-score">${stars}${detailBtn}</div>
                 </div>
             `;
         }).join('');
@@ -646,6 +1178,16 @@
                 selectedRecIndex = idx;
                 renderMyRecordings();
                 recActions.style.display = 'flex';
+            });
+        });
+
+        // 详细评分按钮
+        myRecList.querySelectorAll('.btn-score-detail').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(btn.dataset.recIdx);
+                const rec = myRecordings[idx];
+                if (rec?.scoreResult) showScorePanel(rec.scoreResult);
             });
         });
 
@@ -729,6 +1271,10 @@
             fd.append('user_id', user.id);
             fd.append('user_name', user.nickname);
             fd.append('score', rec.score);
+            // 传递多维度评分详情
+            if (rec.scoreResult) {
+                fd.append('score_detail', JSON.stringify(rec.scoreResult));
+            }
             fd.append('audio', rec.blob, 'recording.webm');
 
             const uploadRes = await apiPost('/recordings/upload', fd);

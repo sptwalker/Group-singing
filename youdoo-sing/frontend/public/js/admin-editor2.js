@@ -48,17 +48,37 @@ function _syncAdjacentBoundary(idx, boundary, value) {
         const prev = idx > 0 ? editorSegments[idx - 1] : null;
         let newStart = Math.max(0, Math.min(rounded, seg.end_time - SEG_MIN_DUR));
         if(prev) {
-            newStart = Math.max(prev.end_time, newStart);
+            const linked = _linkedPairs.has(`${idx-1}:${idx}`);
+            if(linked) {
+                const minPrevEnd = prev.start_time + SEG_MIN_DUR;
+                newStart = Math.max(minPrevEnd, newStart);
+                if(prev.end_time !== newStart) {
+                    prev.end_time = newStart;
+                    changed = true;
+                }
+            } else {
+                newStart = Math.max(prev.end_time, newStart);
+            }
         }
-        changed = seg.start_time !== newStart;
+        changed = seg.start_time !== newStart || changed;
         seg.start_time = newStart;
     } else {
         const next = idx < editorSegments.length - 1 ? editorSegments[idx + 1] : null;
         let newEnd = Math.min(dur, Math.max(rounded, seg.start_time + SEG_MIN_DUR));
         if(next) {
-            newEnd = Math.min(next.start_time, newEnd);
+            const linked = _linkedPairs.has(`${idx}:${idx+1}`);
+            if(linked) {
+                const maxNextStart = next.end_time - SEG_MIN_DUR;
+                newEnd = Math.min(maxNextStart, newEnd);
+                if(next.start_time !== newEnd) {
+                    next.start_time = newEnd;
+                    changed = true;
+                }
+            } else {
+                newEnd = Math.min(next.start_time, newEnd);
+            }
         }
-        changed = seg.end_time !== newEnd;
+        changed = seg.end_time !== newEnd || changed;
         seg.end_time = newEnd;
     }
     seg.start_time = Math.round(seg.start_time * 10) / 10;
@@ -70,6 +90,7 @@ function edUndo() {
     if(editorHistoryIdx <= 0) return;
     editorHistoryIdx--;
     editorSegments = JSON.parse(editorHistory[editorHistoryIdx]);
+    _rebuildLinkedPairs();
     _markDirty(); _renderSegList(); _renderOverlay(); _updateUndoBtn();
 }
 
@@ -77,6 +98,7 @@ function edRedo() {
     if(editorHistoryIdx >= editorHistory.length-1) return;
     editorHistoryIdx++;
     editorSegments = JSON.parse(editorHistory[editorHistoryIdx]);
+    _rebuildLinkedPairs();
     _markDirty(); _renderSegList(); _renderOverlay(); _updateUndoBtn();
 }
 function _updateUndoBtn() {
@@ -87,6 +109,7 @@ function _updateUndoBtn() {
 function _commitChange() {
     _pushHistory();
     _markDirty();
+    _rebuildLinkedPairs();
     _editorSegListVersion = '';
     _editorOverlayVersion = '';
     _renderSegList();
@@ -128,6 +151,7 @@ function _endDrag() {
     if(_dragInfo) {
         const { idx, side } = _dragInfo;
         _dragInfo = null;
+        _rebuildLinkedPairs();
         _checkSmallGapAfterEdit(idx, side);
         _pushHistory();
         _markDirty();
@@ -142,22 +166,26 @@ function _endDrag() {
 function _checkSmallGapAfterEdit(idx, side) {
     const seg = editorSegments[idx];
     if(!seg) return;
-    if(side === 'start' && idx > 0) {
+    // 检查start侧（与前一段的间隙）
+    if(idx > 0) {
         const prev = editorSegments[idx - 1];
         const gap = Math.round((seg.start_time - prev.end_time) * 10) / 10;
-        if(gap > 0.05 && gap < 1.0) {
-            showModal('空白段过小', `<p>当前空白段仅 ${gap.toFixed(1)} 秒，是否合并前后段切片？</p>`,
+        if(gap > 0.05 && gap < 0.5) {
+            showModal('空白段过小', `<p>检测到唱段 #${prev.index} 与 #${seg.index} 之间空白仅 ${gap.toFixed(1)} 秒（小于0.5s），是否直接删除空白贴合唱段？</p>`,
                 `<button class="btn btn-outline" onclick="closeModal()">保留空白</button>
-                 <button class="btn btn-primary" onclick="_mergeGap(${idx},'start')">合并</button>`);
+                 <button class="btn btn-primary" onclick="_mergeGap(${idx},'start')">贴合</button>`);
+            return;
         }
     }
-    if(side === 'end' && idx < editorSegments.length - 1) {
+    // 检查end侧（与后一段的间隙）
+    if(idx < editorSegments.length - 1) {
         const next = editorSegments[idx + 1];
         const gap = Math.round((next.start_time - seg.end_time) * 10) / 10;
-        if(gap > 0.05 && gap < 1.0) {
-            showModal('空白段过小', `<p>当前空白段仅 ${gap.toFixed(1)} 秒，是否合并前后段切片？</p>`,
+        if(gap > 0.05 && gap < 0.5) {
+            showModal('空白段过小', `<p>检测到唱段 #${seg.index} 与 #${next.index} 之间空白仅 ${gap.toFixed(1)} 秒（小于0.5s），是否直接删除空白贴合唱段？</p>`,
                 `<button class="btn btn-outline" onclick="closeModal()">保留空白</button>
-                 <button class="btn btn-primary" onclick="_mergeGap(${idx},'end')">合并</button>`);
+                 <button class="btn btn-primary" onclick="_mergeGap(${idx},'end')">贴合</button>`);
+            return;
         }
     }
 }
@@ -168,15 +196,13 @@ function _mergeGap(idx, side) {
     if(!seg) return;
     if(side === 'start' && idx > 0) {
         const prev = editorSegments[idx - 1];
-        const mid = Math.round(((prev.end_time + seg.start_time) / 2) * 10) / 10;
-        prev.end_time = mid;
-        seg.start_time = mid;
+        // 直接贴合：将前一段end移到当前段start
+        prev.end_time = seg.start_time;
     }
     if(side === 'end' && idx < editorSegments.length - 1) {
         const next = editorSegments[idx + 1];
-        const mid = Math.round(((seg.end_time + next.start_time) / 2) * 10) / 10;
-        seg.end_time = mid;
-        next.start_time = mid;
+        // 直接贴合：将下一段start移到当前段end
+        next.start_time = seg.end_time;
     }
     _commitChange();
 }
@@ -365,6 +391,79 @@ function _hideCtx() {
     if(cm) cm.style.display = 'none';
 }
 
+// ===== 波形空白区域右键菜单 =====
+function _onOverlayContextMenu(e) {
+    // 如果点击在seg-block上，不处理（由seg-block自己的contextmenu处理）
+    if(e.target.closest('.seg-block')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if(!editorSong || !editorWS) return;
+    const dur = _getEditorDuration();
+    if(!dur) return;
+    const host = document.getElementById('waveHost');
+    const waveArea = document.getElementById('waveArea');
+    if(!host || !waveArea) return;
+    const widthPx = _editorWaveMetrics.width || host.clientWidth || 0;
+    if(!widthPx) return;
+    // 计算点击位置对应的时间
+    const rect = waveArea.getBoundingClientRect();
+    const rawX = e.clientX - rect.left + waveArea.scrollLeft;
+    const clickTime = Math.max(0, Math.min(dur, (rawX / widthPx) * dur));
+    // 检查是否在空白区域
+    const inSeg = editorSegments.some(s => clickTime >= s.start_time && clickTime < s.end_time);
+    if(inSeg) return;
+    // 计算空白区域范围
+    let blankStart = 0, blankEnd = dur;
+    for(const s of editorSegments) {
+        if(s.end_time <= clickTime && s.end_time > blankStart) blankStart = s.end_time;
+        if(s.start_time > clickTime && s.start_time < blankEnd) blankEnd = s.start_time;
+    }
+    const blankDur = blankEnd - blankStart;
+    if(blankDur < 3.0) return; // 空白段不足3秒，不显示菜单
+    const cm = document.getElementById('ctxMenu');
+    const blankDurStr = blankDur.toFixed(1);
+    cm.innerHTML = `
+        <div class="ctx-menu-item" onclick="_addSegInBlank(${blankStart},${blankEnd},${clickTime});_hideCtx()">➕ 新建唱段切片 (空白 ${blankDurStr}s)</div>`;
+    cm.style.display = 'block';
+    cm.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
+    cm.style.top = Math.min(e.clientY, window.innerHeight - 80) + 'px';
+}
+
+function _addSegInBlank(blankStart, blankEnd, clickTime) {
+    if(!editorSong) return;
+    const dur = _getEditorDuration();
+    // 在空白区域创建新唱段，以点击位置为中心，默认5秒
+    const defaultLen = 5;
+    let start = Math.max(blankStart, clickTime - defaultLen / 2);
+    let end = Math.min(blankEnd, start + defaultLen);
+    if(end - start < SEG_MIN_DUR) {
+        start = blankStart;
+        end = Math.min(blankEnd, blankStart + defaultLen);
+    }
+    if(end - start < SEG_MIN_DUR) {
+        showToast('空白区域不足以创建唱段', 'error');
+        return;
+    }
+    start = Math.round(start * 10) / 10;
+    end = Math.round(end * 10) / 10;
+    const newSeg = {
+        id: 'new_' + Date.now(),
+        index: 0,
+        lyrics: '',
+        start_time: start,
+        end_time: end,
+        difficulty: 'normal',
+        is_chorus: false,
+        status: 'unassigned'
+    };
+    editorSegments.push(newSeg);
+    editorSegments.sort((a, b) => a.start_time - b.start_time);
+    editorSegments.forEach((s, i) => s.index = i + 1);
+    editorActiveIdx = editorSegments.indexOf(newSeg);
+    _commitChange();
+    showToast('已新建唱段切片', 'success');
+}
+
 // ===== 拆分唱段 =====
 function _splitSeg(idx) {
     const seg = editorSegments[idx];
@@ -418,18 +517,47 @@ async function _saveAll() {
         }
     }
     try {
-        await aPut(`/admin/songs/${editorSong.id}/segments/batch`, { segments: editorSegments });
-        editorDirty = false;
-        document.getElementById('edUnsaved').style.display = 'none';
-        showToast('全部保存成功','success');
-        // 刷新数据
-        const res = await aGet(`/admin/songs/${editorSong.id}`);
-        editorSong = res.data;
-        editorSegments = JSON.parse(JSON.stringify(editorSong.segments||[]));
-        _editorSegListVersion = '';
-        editorHistory = []; editorHistoryIdx = -1; _pushHistory();
-        _renderSegList(); _renderOverlay();
+        const res = await aPut(`/admin/songs/${editorSong.id}/segments/batch`, { segments: editorSegments });
+        // 后端检测到有失效录音，需要确认
+        if(res.need_confirm) {
+            const lines = res.detail.map(d => `#${d.index}「${d.lyrics||'(无歌词)'}」${d.count}条`).join('\n');
+            showModal('录音清理确认',
+                `<p>本次保存将导致 <b>${res.orphan_count}</b> 条用户录音失效（对应的唱段已被修改或删除）：</p>
+                 <pre style="max-height:160px;overflow:auto;background:#f8f9fa;padding:8px;border-radius:6px;font-size:12px;line-height:1.6;">${lines}</pre>
+                 <p style="color:#dc2626;margin-top:8px;">确认保存后，这些录音将被永久删除且无法恢复。</p>`,
+                `<button class="btn btn-outline" onclick="closeModal()">取消</button>
+                 <button class="btn btn-danger" onclick="_confirmSaveWithDelete()">确认保存并删除录音</button>`);
+            return;
+        }
+        _onSaveSuccess(res);
     } catch(e) { showToast(e.message,'error'); }
+}
+
+async function _confirmSaveWithDelete() {
+    closeModal();
+    try {
+        const res = await aPut(`/admin/songs/${editorSong.id}/segments/batch`, {
+            segments: editorSegments,
+            confirm_delete: true
+        });
+        if(res.deleted_recordings > 0) {
+            showToast(`已保存，清理了 ${res.deleted_recordings} 条失效录音`, 'success');
+        }
+        _onSaveSuccess(res);
+    } catch(e) { showToast(e.message,'error'); }
+}
+
+async function _onSaveSuccess(res) {
+    editorDirty = false;
+    document.getElementById('edUnsaved').style.display = 'none';
+    if(!res.deleted_recordings) showToast('全部保存成功','success');
+    // 刷新数据
+    const songRes = await aGet(`/admin/songs/${editorSong.id}`);
+    editorSong = songRes.data;
+    editorSegments = JSON.parse(JSON.stringify(editorSong.segments||[]));
+    _editorSegListVersion = '';
+    editorHistory = []; editorHistoryIdx = -1; _pushHistory();
+    _renderSegList(); _renderOverlay();
 }
 
 // ===== 重置为服务器原始方案 =====

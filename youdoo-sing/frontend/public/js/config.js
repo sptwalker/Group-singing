@@ -5,20 +5,38 @@ const API_BASE = 'http://127.0.0.1:8000/api';
 const AudioManager = {
     _current: null,
     _onStop: null,
+    _pitchSemitones: 0,
+
+    /** 设置升降调（半音数），范围 -6 ~ +6 */
+    setPitch(semitones) {
+        this._pitchSemitones = Math.max(-6, Math.min(6, semitones));
+        if (this._current) {
+            this._current.preservesPitch = false;
+            this._current.playbackRate = Math.pow(2, this._pitchSemitones / 12);
+        }
+    },
+
+    getPitch() { return this._pitchSemitones; },
+
+    _applyPitch(audio) {
+        if (this._pitchSemitones !== 0) {
+            audio.preservesPitch = false;
+            audio.playbackRate = Math.pow(2, this._pitchSemitones / 12);
+        }
+    },
 
     play(src, onEnd, onTimeUpdate) {
         this.stop();
         const audio = new Audio(src);
         if (!src.startsWith('blob:')) audio.crossOrigin = 'anonymous';
+        this._applyPitch(audio);
         this._current = audio;
         audio.onplay = () => {
             if (this._onStop) this._onStop('playing');
         };
         audio.onpause = () => {
-            // 手动暂停或自然暂停：通知 UI 重置按钮状态（但 stop() 会先清 _onStop 再同步调用）
-            this._current = null;
-            if (this._onStop) this._onStop();
-            this._onStop = null;
+            // 手动暂停不清空 _current，允许恢复播放
+            // stop() 会先清 onpause 再 pause()，所以 stop 不会触发这里
         };
         audio.onended = () => {
             this._current = null;
@@ -43,6 +61,7 @@ const AudioManager = {
         this.stop();
         const audio = new Audio(src);
         if (!src.startsWith('blob:')) audio.crossOrigin = 'anonymous';
+        this._applyPitch(audio);
         this._current = audio;
 
         const checkTime = () => {

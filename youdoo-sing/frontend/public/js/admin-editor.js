@@ -8,7 +8,7 @@ let _loopPlay = false, _playingSegOnly = false;
 let _editorEventsBound = false, _editorHighlightedIdx = -1, _editorPlayingIdx = -1;
 let _editorOverlayVersion = '';
 let _editorPlayingBlock = null;
-let _editorWaveMetrics = { width: 0, height: 180 };
+let _editorWaveMetrics = { width: 0, height: 220 };
 let _editorPxPerSec = 0;
 let _editorSegListVersion = '';
 let _editorZoom = 60;
@@ -22,6 +22,7 @@ let _editorPausedSegIdx = -1;
 let _editorPauseOriginSegIdx = -1;
 let _editorIsPlaying = false;
 let _editorWaveDrag = null;
+let _linkedPairs = new Set(); // 存储连锁对 "i:j" 形式
 
 
 
@@ -71,8 +72,8 @@ async function renderEditor(container) {
                 </div>
                 <div class="waveform-area" id="waveArea">
                     <div class="wave-host" id="waveHost">
-                        <div id="waveformWrap" style="min-height:180px;position:relative;">
-                            <div class="editor-empty" style="height:180px;"><p>选择歌曲加载波形</p></div>
+                        <div id="waveformWrap" style="min-height:220px;position:relative;">
+                            <div class="editor-empty" style="height:220px;"><p>选择歌曲加载波形</p></div>
                         </div>
                         <div class="seg-overlay-container" id="segOverlay"></div>
                     </div>
@@ -153,14 +154,26 @@ function _tickEditorAudio() {
     _updatePlaybar(currentTime);
     if(_playingSegOnly && editorActiveIdx>=0) {
         const seg = editorSegments[editorActiveIdx];
-        if(seg && currentTime >= seg.end_time) {
-            if(_loopPlay) {
+        if(seg) {
+            // 严格边界检查：超过end_time立即停止或循环
+            if(currentTime >= seg.end_time - 0.02) {
+                if(_loopPlay) {
+                    editorAudio.currentTime = seg.start_time;
+                } else {
+                    editorAudio.currentTime = seg.end_time;
+                    _playingSegOnly = false;
+                    _editorPauseOriginSegIdx = -1;
+                    _editorIsPlaying = false;
+                    _setPlayButtonState(false);
+                    _setSegmentPlayingState(-1);
+                    editorAudio.pause();
+                    _updatePlaybar(seg.end_time);
+                    return;
+                }
+            }
+            // 防止播放越过唱段起始边界
+            if(currentTime < seg.start_time) {
                 editorAudio.currentTime = seg.start_time;
-            } else {
-                _playingSegOnly = false;
-                _editorPauseOriginSegIdx = -1;
-                editorAudio.pause();
-                return;
             }
         }
     }
@@ -221,6 +234,27 @@ function _ensureEditorAudio() {
     });
     editorAudio.addEventListener('canplay', () => {
         console.log('[editor-audio] canplay', { url, currentTime: editorAudio?.currentTime, readyState: editorAudio?.readyState });
+    });
+    // 备用边界检查：timeupdate 事件作为 RAF 的补充
+    editorAudio.addEventListener('timeupdate', () => {
+        if(!editorAudio || !_playingSegOnly || editorActiveIdx < 0) return;
+        const seg = editorSegments[editorActiveIdx];
+        if(!seg) return;
+        const ct = editorAudio.currentTime || 0;
+        if(ct >= seg.end_time - 0.02) {
+            if(_loopPlay) {
+                editorAudio.currentTime = seg.start_time;
+            } else {
+                editorAudio.currentTime = seg.end_time;
+                _playingSegOnly = false;
+                _editorPauseOriginSegIdx = -1;
+                _editorIsPlaying = false;
+                _setPlayButtonState(false);
+                _setSegmentPlayingState(-1);
+                editorAudio.pause();
+                _updatePlaybar(seg.end_time);
+            }
+        }
     });
     editorAudio.addEventListener('stalled', () => {
         console.warn('[editor-audio] stalled', { url, currentTime: editorAudio?.currentTime, networkState: editorAudio?.networkState });
@@ -485,10 +519,12 @@ function _updateCursorLine(currentTime, { autoFollow = true } = {}) {
     }
     if(waveArea && autoFollow && _editorAutoFollowEnabled) {
         const viewLeft = waveArea.scrollLeft;
-        const viewRight = viewLeft + waveArea.clientWidth;
-        const padding = Math.min(96, Math.max(48, waveArea.clientWidth * 0.18));
-        if(left > viewRight - padding) waveArea.scrollLeft = Math.max(0, left - waveArea.clientWidth + padding);
-        else if(left < viewLeft + padding) waveArea.scrollLeft = Math.max(0, left - padding);
+        const viewWidth = waveArea.clientWidth;
+        const center = viewLeft + viewWidth / 2;
+        const tolerance = viewWidth * 0.05;
+        if(Math.abs(left - center) > tolerance) {
+            waveArea.scrollLeft = Math.max(0, left - viewWidth / 2);
+        }
     }
 }
 
@@ -690,7 +726,7 @@ function _syncWaveMetrics() {
     const canvas = wrap.querySelector('canvas');
     const svg = wrap.querySelector('svg');
     const width = _getWaveRenderWidth();
-    const height = Math.max(wrap.offsetHeight, wsScrollable?.getBoundingClientRect?.().height || 0, waveEl?.getBoundingClientRect?.().height || 0, canvas?.getBoundingClientRect?.().height || 0, svg?.getBoundingClientRect?.().height || 0, 180);
+    const height = Math.max(wrap.offsetHeight, wsScrollable?.getBoundingClientRect?.().height || 0, waveEl?.getBoundingClientRect?.().height || 0, canvas?.getBoundingClientRect?.().height || 0, svg?.getBoundingClientRect?.().height || 0, 220);
     const viewportWidth = Math.max(waveArea?.clientWidth || 0, 1);
     const widthChanged = width !== _editorWaveMetrics.width || height !== _editorWaveMetrics.height;
     _editorWaveMetrics = { width, height };
@@ -716,7 +752,7 @@ function _syncWaveMetrics() {
 function _createOverlayBlock(i) {
     const block = document.createElement('div');
     block.className = 'seg-block';
-    block.innerHTML = `<div class="seg-handle seg-handle-left" data-side="left"></div><span class="seg-block-label"></span><div class="seg-handle seg-handle-right" data-side="right"></div>`;
+    block.innerHTML = `<div class="seg-handle seg-handle-left" data-side="left"></div><div class="seg-handle seg-handle-right" data-side="right"></div>`;
     _bindOverlayBlock(block, i);
     return block;
 }
@@ -736,16 +772,26 @@ function _overlaySignature() {
 function _syncOverlayBlocks(ov) {
     const signature = _overlaySignature();
     if(signature !== _editorOverlayVersion) {
-        while(ov.children.length > editorSegments.length) {
-            ov.lastElementChild?.remove();
+        // 只操作 .seg-block 元素，不影响标签和连锁标记
+        let blocks = Array.from(ov.querySelectorAll(':scope > .seg-block'));
+        while(blocks.length > editorSegments.length) {
+            blocks.pop().remove();
         }
-        while(ov.children.length < editorSegments.length) {
-            ov.appendChild(_createOverlayBlock(ov.children.length));
+        while(blocks.length < editorSegments.length) {
+            const newBlock = _createOverlayBlock(blocks.length);
+            // 插入到标签/连锁标记之前（即第一个非seg-block元素之前）
+            const firstNonBlock = ov.querySelector(':scope > :not(.seg-block)');
+            if(firstNonBlock) {
+                ov.insertBefore(newBlock, firstNonBlock);
+            } else {
+                ov.appendChild(newBlock);
+            }
+            blocks.push(newBlock);
         }
-        Array.from(ov.children).forEach((el, i) => _bindOverlayBlock(el, i));
+        blocks.forEach((el, i) => _bindOverlayBlock(el, i));
         _editorOverlayVersion = signature;
     }
-    return Array.from(ov.children);
+    return Array.from(ov.querySelectorAll(':scope > .seg-block'));
 }
 
 function _updateOverlayBlock(el, seg, i, dur) {
@@ -758,8 +804,6 @@ function _updateOverlayBlock(el, seg, i, dur) {
     el.style.width = `${Math.max(blockWidth, 2)}px`;
     el.style.background = SEG_COLORS[i % 3];
     el.className = `seg-block ${seg.is_chorus?'is-chorus':''} ${i===editorActiveIdx?'active':''} ${i===_editorPlayingIdx?'playing':''}`.trim();
-    const label = el.querySelector('.seg-block-label');
-    if(label) label.textContent = seg.index;
     const leftHandle = el.querySelector('.seg-handle-left');
     const rightHandle = el.querySelector('.seg-handle-right');
     if(leftHandle) leftHandle.dataset.idx = String(i);
@@ -854,18 +898,59 @@ function _bindEditorEvents() {
     };
     $('sdBtnPauseSeg').onclick = () => { if(editorActiveIdx>=0) _pauseSegmentAudio(editorActiveIdx); };
     $('sdBtnAdjust').onclick = () => {
-        if(editorActiveIdx < 0 || editorActiveIdx >= editorSegments.length - 1) return;
+        if(!editorSong || editorSegments.length === 0) return;
         const t = Math.round(_getEditorCurrentTime() * 10) / 10;
-        const seg = editorSegments[editorActiveIdx];
-        const next = editorSegments[editorActiveIdx + 1];
-        if(t <= seg.start_time + SEG_MIN_DUR || t >= next.end_time - SEG_MIN_DUR) {
-            showToast('进度线位置不适合调整切分','error'); return;
+
+        // 检查进度线是否在某个唱段内
+        const inSegIdx = editorSegments.findIndex(s => t >= s.start_time && t < s.end_time);
+
+        if(inSegIdx >= 0) {
+            // 在唱段内：调整与下一段的分界线
+            if(inSegIdx >= editorSegments.length - 1) {
+                showToast('最后一段无法调整后边界','error'); return;
+            }
+            const seg = editorSegments[inSegIdx];
+            const next = editorSegments[inSegIdx + 1];
+            if(t <= seg.start_time + SEG_MIN_DUR || t >= next.end_time - SEG_MIN_DUR) {
+                showToast('进度线位置不适合调整切分','error'); return;
+            }
+            // 如果两段之前是贴合的，同时移动（issue 6）
+            const wasAdjacent = Math.abs(seg.end_time - next.start_time) < 0.05;
+            seg.end_time = t;
+            next.start_time = t;
+            _commitChange();
+            _renderSegDetail();
+            showToast('已调整切分','success');
+        } else {
+            // 在空白段：找最邻近的唱段边界并移动过来
+            let bestIdx = -1, bestSide = '', bestDist = Infinity;
+            editorSegments.forEach((s, i) => {
+                const dStart = Math.abs(t - s.start_time);
+                const dEnd = Math.abs(t - s.end_time);
+                if(dEnd < bestDist) { bestDist = dEnd; bestIdx = i; bestSide = 'end'; }
+                if(dStart < bestDist) { bestDist = dStart; bestIdx = i; bestSide = 'start'; }
+            });
+            if(bestIdx < 0) { showToast('没有可调整的唱段','error'); return; }
+            const seg = editorSegments[bestIdx];
+            // 验证移动后唱段不会太短
+            if(bestSide === 'end') {
+                if(t <= seg.start_time + SEG_MIN_DUR) { showToast('移动后唱段太短','error'); return; }
+                // 不能越过下一段
+                const next = bestIdx < editorSegments.length - 1 ? editorSegments[bestIdx + 1] : null;
+                if(next && t >= next.start_time) { showToast('不能越过下一段','error'); return; }
+                seg.end_time = t;
+            } else {
+                if(t >= seg.end_time - SEG_MIN_DUR) { showToast('移动后唱段太短','error'); return; }
+                // 不能越过上一段
+                const prev = bestIdx > 0 ? editorSegments[bestIdx - 1] : null;
+                if(prev && t <= prev.end_time) { showToast('不能越过上一段','error'); return; }
+                seg.start_time = t;
+            }
+            _selectSeg(bestIdx, false);
+            _commitChange();
+            _renderSegDetail();
+            showToast(`已将唱段#${seg.index}的${bestSide==='end'?'结束':'开始'}边界移到进度线位置`,'success');
         }
-        seg.end_time = t;
-        next.start_time = t;
-        _commitChange();
-        _renderSegDetail();
-        showToast('已调整切分','success');
     };
     $('sdBtnSplit').onclick = () => { if(editorActiveIdx>=0) _splitSeg(editorActiveIdx); };
     $('sdBtnMerge').onclick = () => { if(editorActiveIdx>=0) _mergeWithNext(editorActiveIdx); };
@@ -883,6 +968,15 @@ function _bindEditorEvents() {
     if(!_editorEventsBound) {
         document.addEventListener('keydown', _edKeydown);
         document.addEventListener('click', _hideCtx);
+        // 波形空白区域右键菜单
+        const segOv = document.getElementById('segOverlay');
+        if(segOv) {
+            segOv.addEventListener('contextmenu', _onOverlayContextMenu);
+        }
+        const waveWrap = document.getElementById('waveformWrap');
+        if(waveWrap) {
+            waveWrap.addEventListener('contextmenu', _onOverlayContextMenu);
+        }
         window.addEventListener('resize', () => {
             _syncWaveMetrics();
             _updateCursorLine(_getEditorCurrentTime());
@@ -924,6 +1018,7 @@ async function _loadSong(songId) {
 
         _loopPlay = false;
         _setLoopButtonState();
+        _rebuildLinkedPairs();
         editorHistory = []; editorHistoryIdx = -1;
         _pushHistory();
         document.getElementById('edSongTitle').textContent = `${editorSong.title} - ${editorSong.artist}`;
@@ -956,7 +1051,7 @@ function _initWS() {
     console.log('[admin] init waveform url:', url);
 
     if(typeof WaveSurfer === 'undefined' || !WaveSurfer?.create) {
-        wrap.innerHTML = '<div class="editor-empty" style="height:180px;"><p>波形组件加载失败，请刷新页面重试</p></div>';
+        wrap.innerHTML = '<div class="editor-empty" style="height:220px;"><p>波形组件加载失败，请刷新页面重试</p></div>';
         _ensureWaveOverlayHost();
         _ensureEditorAudio();
         _updatePlaybar(0);
@@ -974,7 +1069,7 @@ function _initWS() {
             try { editorWS.destroy(); } catch (e) {}
             editorWS = null;
         }
-        wrap.innerHTML = `<div class="editor-empty" style="height:180px;"><p>${message}</p></div>`;
+        wrap.innerHTML = `<div class="editor-empty" style="height:220px;"><p>${message}</p></div>`;
         _ensureWaveOverlayHost();
         _ensureEditorAudio();
         _updatePlaybar(0);
@@ -987,7 +1082,7 @@ function _initWS() {
             progressColor:'#c7d2fe',
             cursorColor:'transparent',
             cursorWidth:0,
-            height:160,
+            height:200,
             normalize:false,
             minPxPerSec:0,
             fillParent:true,
@@ -1079,6 +1174,69 @@ function _renderOverlay() {
         const seg = editorSegments[i];
         if(seg) _updateOverlayBlock(el, seg, i, dur);
     });
+    _renderOverlayLabels(ov, dur);
+    _renderLinkIndicators(ov, dur);
+}
+
+// ===== 唱段编号标签（独立于seg-block，不受opacity影响） =====
+function _renderOverlayLabels(ov, dur) {
+    ov.querySelectorAll('.seg-block-label').forEach(el => el.remove());
+    if(!dur) return;
+    const widthPx = _editorWaveMetrics.width || document.getElementById('waveHost')?.clientWidth || 0;
+    if(!widthPx) return;
+    const SEG_COLORS = ['#10b981', '#3b82f6', '#f59e0b'];
+    editorSegments.forEach((seg, i) => {
+        const left = (seg.start_time / dur) * widthPx;
+        const blockWidth = ((seg.end_time - seg.start_time) / dur) * widthPx;
+        const centerX = left + blockWidth / 2;
+        const label = document.createElement('div');
+        label.className = 'seg-block-label';
+        label.textContent = seg.index;
+        label.style.left = `${centerX}px`;
+        label.style.color = SEG_COLORS[i % 3];
+        ov.appendChild(label);
+    });
+}
+
+// ===== 连锁对系统 =====
+function _rebuildLinkedPairs() {
+    _linkedPairs.clear();
+    for(let i = 0; i < editorSegments.length - 1; i++) {
+        const cur = editorSegments[i];
+        const next = editorSegments[i + 1];
+        if(Math.abs(next.start_time - cur.end_time) < 0.05) {
+            _linkedPairs.add(`${i}:${i+1}`);
+        }
+    }
+}
+
+function _isLinked(i, j) {
+    const a = Math.min(i, j), b = Math.max(i, j);
+    return _linkedPairs.has(`${a}:${b}`);
+}
+
+function _renderLinkIndicators(ov, dur) {
+    // 清除旧的连锁标记
+    ov.querySelectorAll('.seg-link-indicator').forEach(el => el.remove());
+    if(!dur) return;
+    const widthPx = _editorWaveMetrics.width || document.getElementById('waveHost')?.clientWidth || 0;
+    if(!widthPx) return;
+    // 拖拽期间不重建连锁对，保持拖拽开始时的连锁状态
+    if(!_dragInfo) {
+        _rebuildLinkedPairs();
+    }
+    for(const pair of _linkedPairs) {
+        const [a, b] = pair.split(':').map(Number);
+        const segA = editorSegments[a];
+        if(!segA) continue;
+        const left = (segA.end_time / dur) * widthPx;
+        const indicator = document.createElement('div');
+        indicator.className = 'seg-link-indicator';
+        indicator.style.left = `${left}px`;
+        indicator.title = `唱段 ${a+1} ↔ ${b+1} 已连锁`;
+        indicator.innerHTML = '<span class="link-icon">🔗</span><span class="link-line"></span>';
+        ov.appendChild(indicator);
+    }
 }
 
 // ===== 左侧唱段列表 =====
@@ -1109,6 +1267,9 @@ function _renderSegList() {
         const ac = i===editorActiveIdx ? 'active' : '';
         const pl = i===_editorPlayingIdx ? 'playing' : '';
         const idxColor = SEG_COLORS[i % 3];
+        const linkedPrev = i > 0 && _isLinked(i-1, i);
+        const linkedNext = i < editorSegments.length - 1 && _isLinked(i, i+1);
+        const linkBadge = (linkedPrev || linkedNext) ? '<span class="badge badge-link" title="已连锁">🔗</span>' : '';
         return `<div class="seg-card ${ac} ${pl}" data-idx="${i}" onclick="_selectSeg(${i})" oncontextmenu="event.preventDefault();_showCtx(event,${i})">
             <div class="seg-card-top">
                 <div class="seg-card-idx" style="background:${idxColor};color:#fff;">${seg.index}</div>
@@ -1117,6 +1278,7 @@ function _renderSegList() {
                     <div class="seg-card-badges">
                         <span class="badge badge-${seg.difficulty}">${seg.difficulty}</span>
                         ${seg.is_chorus?'<span class="badge badge-chorus">合唱</span>':'<span class="badge">独唱</span>'}
+                        ${linkBadge}
                     </div>
                 </div>
             </div>

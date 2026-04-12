@@ -14,8 +14,7 @@
     const songTitle = document.getElementById('songTitle');
     const songArtist = document.getElementById('songArtist');
     const btnLogout = document.getElementById('btnLogout');
-    const btnPlay = document.getElementById('btnPlay');
-    const btnPause = document.getElementById('btnPause');
+    const btnPlayPause = document.getElementById('btnPlayPause');
     const btnStop = document.getElementById('btnStop');
     const progressFill = document.getElementById('progressFill');
     const progressBar = document.getElementById('progressBar');
@@ -28,6 +27,9 @@
     const navPrev = document.getElementById('navPrev');
     const navNext = document.getElementById('navNext');
     const recordingList = document.getElementById('recordingList');
+
+    // WaveSurfer 可视化实例
+    let _visualizerWS = null;
 
     // 退出登录
     btnLogout.addEventListener('click', () => {
@@ -103,7 +105,7 @@
                         <span class="lyric-task-diff diff-${diffCls}">${diffLabels[seg.difficulty]}</span>
                         ${seg.is_chorus ? '<span class="lyric-task-chorus">合</span>' : ''}
                         <span class="lyric-task-text">${seg.lyrics || '♪ ♪ ♪'}</span>
-                        <span class="lyric-task-count">${submitCount > 0 ? submitCount + '人' : ''}</span>
+                        <span class="lyric-task-count ${submitCount > 0 ? 'has-submit' : ''}">${submitCount}人次</span>
                     </div>
                     <div class="lyric-task-expand" data-seg-id="${seg.id}" style="display:none;">
                         <button class="lyric-task-btn btn-lt-play" data-seg-id="${seg.id}">▶ 试听</button>
@@ -194,10 +196,17 @@
         isFullPlaying = false;
 
         const audioUrl = `${API_BASE.replace('/api', '')}${currentSong.audio_url}`;
+        ensureVisualizer(audioUrl);
         AudioManager.playRange(audioUrl, seg.start_time, seg.end_time,
             () => {
                 btn.textContent = '▶ 试听';
                 btn.classList.remove('playing');
+                if (_visualizerWS) _visualizerWS.seekTo(0);
+            },
+            (cur, dur) => {
+                if (_visualizerWS && _visualizerWS.getDuration() > 0) {
+                    _visualizerWS.seekTo(cur / _visualizerWS.getDuration());
+                }
             }
         );
         btn.textContent = '⏹ 停止';
@@ -231,39 +240,81 @@
     // ===== 整曲播放控制 =====
     let isFullPlaying = false;
 
-    btnPlay.addEventListener('click', () => {
-        if (isFullPlaying) return;
+    // 初始化 WaveSurfer 可视化
+    function initVisualizer() {
+        if (_visualizerWS) return;
+        const container = document.getElementById('waveVisualizer');
+        if (!container || typeof WaveSurfer === 'undefined') return;
+        // 暂不加载音频，等播放时再加载
+    }
+
+    function ensureVisualizer(audioUrl) {
+        const container = document.getElementById('waveVisualizer');
+        if (!container || typeof WaveSurfer === 'undefined') return;
+        if (_visualizerWS) {
+            try { _visualizerWS.destroy(); } catch(e) {}
+            _visualizerWS = null;
+        }
+        _visualizerWS = WaveSurfer.create({
+            container: container,
+            waveColor: 'rgba(255,255,255,0.25)',
+            progressColor: '#07c160',
+            cursorColor: 'rgba(255,255,255,0.5)',
+            cursorWidth: 1,
+            height: 56,
+            barWidth: 3,
+            barGap: 2,
+            barRadius: 2,
+            normalize: true,
+            interact: true,
+            hideScrollbar: true,
+            url: audioUrl,
+        });
+        _visualizerWS.on('interaction', (time) => {
+            const audio = AudioManager.getCurrent();
+            if (audio && isFullPlaying) {
+                audio.currentTime = time;
+            }
+        });
+    }
+
+    btnPlayPause.addEventListener('click', () => {
+        const audio = AudioManager.getCurrent();
+        // 当前正在播放 → 暂停
+        if (audio && isFullPlaying && !audio.paused) {
+            audio.pause();
+            btnPlayPause.textContent = '▶';
+            btnPlayPause.classList.remove('active');
+            return;
+        }
+        // 当前已暂停 → 恢复
+        if (audio && isFullPlaying && audio.paused) {
+            audio.play();
+            btnPlayPause.textContent = '⏸';
+            btnPlayPause.classList.add('active');
+            return;
+        }
+        // 未在播放 → 开始播放
+        if (!currentSong) return;
         const audioUrl = `${API_BASE.replace('/api', '')}${currentSong.audio_url}`;
+        ensureVisualizer(audioUrl);
         AudioManager.play(audioUrl,
-            () => { resetPlayButtons(); isFullPlaying = false; },
+            () => {
+                resetPlayButtons();
+                isFullPlaying = false;
+                if (_visualizerWS) _visualizerWS.seekTo(0);
+            },
             (cur, dur) => {
                 progressFill.style.width = (cur / dur * 100) + '%';
                 timeLabel.textContent = formatTime(cur);
+                if (_visualizerWS && _visualizerWS.getDuration() > 0) {
+                    _visualizerWS.seekTo(cur / _visualizerWS.getDuration());
+                }
             }
         );
         isFullPlaying = true;
-        btnPlay.classList.add('active');
-        btnPause.classList.remove('active');
-    });
-
-    btnPause.addEventListener('click', () => {
-        const audio = AudioManager.getCurrent();
-        if (audio && isFullPlaying) {
-            if (audio.paused) {
-                audio.play();
-                btnPause.classList.remove('active');
-                btnPlay.classList.add('active');
-            } else {
-                audio.pause();
-                btnPause.classList.add('active');
-                btnPlay.classList.remove('active');
-            }
-        } else if (audio && !isFullPlaying && audio.paused) {
-            // resume from paused preview
-            audio.play();
-            btnPlay.classList.add('active');
-            btnPause.classList.remove('active');
-        }
+        btnPlayPause.textContent = '⏸';
+        btnPlayPause.classList.add('active');
     });
 
     btnStop.addEventListener('click', () => {
@@ -272,6 +323,7 @@
         isFullPlaying = false;
         progressFill.style.width = '0%';
         timeLabel.textContent = '0:00';
+        if (_visualizerWS) _visualizerWS.seekTo(0);
     });
 
     progressBar.addEventListener('click', (e) => {
@@ -284,8 +336,8 @@
     });
 
     function resetPlayButtons() {
-        btnPlay.classList.remove('active');
-        btnPause.classList.remove('active');
+        btnPlayPause.textContent = '▶';
+        btnPlayPause.classList.remove('active');
     }
 
     // ===== 随机领取 =====
@@ -323,6 +375,7 @@
             isFullPlaying = false;
             progressFill.style.width = '0%';
             timeLabel.textContent = '0:00';
+            if (_visualizerWS) { try { _visualizerWS.destroy(); } catch(e){} _visualizerWS = null; }
             loadSong(currentSongIndex - 1);
         }
     });
@@ -334,6 +387,7 @@
             isFullPlaying = false;
             progressFill.style.width = '0%';
             timeLabel.textContent = '0:00';
+            if (_visualizerWS) { try { _visualizerWS.destroy(); } catch(e){} _visualizerWS = null; }
             loadSong(currentSongIndex + 1);
         }
     });
@@ -357,10 +411,28 @@
             const res = await apiGet(`/recordings?song_id=${currentSong.id}`);
             recordings = res.data || [];
             renderRecordings();
+            updateLyricsSubmitCounts();
         } catch (e) {
             recordings = [];
             renderRecordings();
         }
+    }
+
+    function updateLyricsSubmitCounts() {
+        // 从 recordings 数组统计每个 segment_id 的提交人次
+        const countMap = {};
+        recordings.forEach(r => {
+            countMap[r.segment_id] = (countMap[r.segment_id] || 0) + 1;
+        });
+        lyricsTaskList.querySelectorAll('.lyric-task-item').forEach(item => {
+            const segId = item.dataset.segId;
+            const count = countMap[segId] || 0;
+            const el = item.querySelector('.lyric-task-count');
+            if (el) {
+                el.textContent = count + '人次';
+                el.classList.toggle('has-submit', count > 0);
+            }
+        });
     }
 
     // WaveSurfer 实例管理
@@ -391,7 +463,7 @@
         list.forEach((rec, i) => {
             const seg = currentSong.segments.find(s => s.id === rec.segment_id);
             if (sortMode === 'order' && rec.segment_id !== lastSegId) {
-                html += `<div class="rec-seg-separator"><span class="sep-lyrics">${seg ? '#' + seg.index + ' ' + seg.lyrics : ''}</span></div>`;
+                html += `<div class="rec-seg-separator" data-sep-seg-id="${rec.segment_id}"><span class="sep-lyrics">${seg ? '#' + seg.index + ' ' + seg.lyrics : ''}</span></div>`;
             }
             lastSegId = rec.segment_id;
             const timeStr = rec.created_at ? `<span class="rec-time">${rec.created_at}</span>` : '';
@@ -489,11 +561,16 @@
             });
         });
 
-        // 滚动到聚焦段
+        // 滚动到聚焦段（置顶）
         if (focusSegId) {
             setTimeout(() => {
+                const sep = recordingList.querySelector(`.rec-seg-separator[data-sep-seg-id="${focusSegId}"]`);
+                if (sep) {
+                    sep.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    return;
+                }
                 const focusCard = recordingList.querySelector(`.rec-card[data-seg-id="${focusSegId}"]`);
-                if (focusCard) focusCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (focusCard) focusCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 100);
         }
     }

@@ -51,7 +51,13 @@ function showModal(title, bodyHtml, footerHtml) {
             <div class="modal-body">${bodyHtml}</div>
             ${footerHtml ? `<div class="modal-footer">${footerHtml}</div>` : ''}
         </div></div>`;
-    document.getElementById('modalOverlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+    const overlay = document.getElementById('modalOverlay');
+    let _modalMouseDownTarget = null;
+    overlay.addEventListener('mousedown', e => { _modalMouseDownTarget = e.target; });
+    overlay.addEventListener('click', e => {
+        if (e.target === e.currentTarget && _modalMouseDownTarget === e.currentTarget) closeModal();
+        _modalMouseDownTarget = null;
+    });
 }
 function closeModal() { document.getElementById('modalContainer').innerHTML = ''; }
 

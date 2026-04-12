@@ -13,19 +13,23 @@
         <div class="task-header">
             <div class="header-top">
                 <div class="song-title-area">
-                    <div class="current-song-title" id="songTitle">加载中...</div>
+                    <div class="song-title-row">
+                        <div class="current-song-title" id="songTitle">加载中...</div>
+                        <button class="btn-ctrl-mini" id="btnPlayPause" title="播放/暂停">▶</button>
+                        <button class="btn-ctrl-mini btn-ctrl-mini-stop" id="btnStop" title="停止">⏹</button>
+                    </div>
                     <div class="current-song-artist" id="songArtist"></div>
                 </div>
                 <button class="btn-logout-icon" id="btnLogout" title="退出登录">退出登录</button>
             </div>
             <div class="play-controls">
-                <button class="btn-ctrl" id="btnPlay" title="播放">▶</button>
-                <button class="btn-ctrl" id="btnPause" title="暂停">⏸</button>
-                <button class="btn-ctrl" id="btnStop" title="停止">⏹</button>
-                <div class="progress-bar-wrap" id="progressBar">
-                    <div class="progress-bar-fill" id="progressFill"></div>
+                <div class="waveform-visualizer" id="waveVisualizer"></div>
+                <div class="progress-row">
+                    <div class="progress-bar-wrap" id="progressBar">
+                        <div class="progress-bar-fill" id="progressFill"></div>
+                    </div>
+                    <span class="time-label" id="timeLabel">0:00</span>
                 </div>
-                <span class="time-label" id="timeLabel">0:00</span>
             </div>
             <div class="header-stats">
                 <div class="stat-item">📊 完成度 <span class="stat-value" id="statCompletion">0%</span></div>
