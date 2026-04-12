@@ -6,6 +6,7 @@ import os
 import json
 import hashlib
 import time
+from datetime import datetime
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -235,6 +236,9 @@ def init_demo_data():
         }
 
 
+# ============ 初始化演示数据 ============
+init_demo_data()
+
 # ============ 用户接口 ============
 
 @router.post("/user/login")
@@ -400,6 +404,7 @@ async def upload_recording(
         "likes": 0,
         "submitted": False,
         "selected": False,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     RECORDINGS_DB[rec_id] = recording
     return {"success": True, "data": recording}

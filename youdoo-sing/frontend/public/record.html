@@ -27,6 +27,14 @@
 
         <!-- 控制区 -->
         <div class="record-controls">
+            <!-- 实时录音波形 -->
+            <div class="live-wave-panel" id="liveWavePanel" style="display:none;">
+                <canvas id="liveWaveCanvas" width="600" height="48"></canvas>
+                <div class="live-wave-status">
+                    <span class="live-wave-countdown" id="liveWaveCountdown"></span>
+                    <span class="live-wave-label" id="liveWaveLabel">请准备</span>
+                </div>
+            </div>
             <div class="control-row">
                 <button class="btn-record-ctrl btn-audition" id="btnAudition">▶ 播放试唱</button>
                 <button class="btn-record-ctrl btn-record" id="btnRecord">🎤 录音</button>
@@ -60,6 +68,7 @@
         <div class="countdown-num" id="countdownNum">3</div>
     </div>
 
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
     <script src="js/config.js"></script>
     <script src="js/record.js"></script>
 </body>

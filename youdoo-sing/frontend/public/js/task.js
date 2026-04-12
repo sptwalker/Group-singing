@@ -13,7 +13,7 @@
     // DOM
     const songTitle = document.getElementById('songTitle');
     const songArtist = document.getElementById('songArtist');
-    const userAvatar = document.getElementById('userAvatar');
+    const btnLogout = document.getElementById('btnLogout');
     const btnPlay = document.getElementById('btnPlay');
     const btnPause = document.getElementById('btnPause');
     const btnStop = document.getElementById('btnStop');
@@ -29,9 +29,8 @@
     const navNext = document.getElementById('navNext');
     const recordingList = document.getElementById('recordingList');
 
-    // 初始化头像
-    userAvatar.src = user.avatar;
-    userAvatar.addEventListener('click', () => {
+    // 退出登录
+    btnLogout.addEventListener('click', () => {
         if (confirm('确定退出登录？')) {
             localStorage.removeItem('youdoo_user');
             window.location.href = 'index.html';
@@ -364,7 +363,15 @@
         }
     }
 
+    // WaveSurfer 实例管理
+    let _taskRecWsList = [];
+    function _destroyTaskRecWS() {
+        _taskRecWsList.forEach(ws => { try { ws.destroy(); } catch(e){} });
+        _taskRecWsList = [];
+    }
+
     function renderRecordings() {
+        _destroyTaskRecWS();
         let list = [...recordings];
         if (sortMode === 'order') {
             list.sort((a, b) => {
@@ -381,52 +388,88 @@
 
         let html = '';
         let lastSegId = null;
-        list.forEach((rec) => {
+        list.forEach((rec, i) => {
             const seg = currentSong.segments.find(s => s.id === rec.segment_id);
-            // 歌词顺序排序时，段切换处插入分隔线（包括第一段之前）
             if (sortMode === 'order' && rec.segment_id !== lastSegId) {
                 html += `<div class="rec-seg-separator"><span class="sep-lyrics">${seg ? '#' + seg.index + ' ' + seg.lyrics : ''}</span></div>`;
             }
             lastSegId = rec.segment_id;
+            const timeStr = rec.created_at ? `<span class="rec-time">${rec.created_at}</span>` : '';
             html += `
-                <div class="rec-card ${(focusSegId && rec.segment_id === focusSegId) ? 'rec-card-focus' : ''}" data-id="${rec.id}" data-seg-id="${rec.segment_id}">
-                    <button class="btn-play-mini" data-url="${API_BASE.replace('/api', '')}${rec.audio_url}" data-id="${rec.id}">▶</button>
-                    <div style="flex:1;">
-                        <div class="rec-user">${rec.user_name}</div>
-                        <div class="rec-seg-num">#${seg ? seg.index : '?'} ${seg ? seg.lyrics : ''}</div>
+                <div class="rec-card ${(focusSegId && rec.segment_id === focusSegId) ? 'rec-card-focus' : ''}" data-id="${rec.id}" data-seg-id="${rec.segment_id}" data-rec-idx="${i}">
+                    <div class="rec-card-top">
+                        <button class="btn-play-mini" data-rec-idx="${i}">▶</button>
+                        <div style="flex:1;min-width:0;">
+                            <div class="rec-user">${rec.user_name} ${timeStr}</div>
+                            <div class="rec-seg-num">#${seg ? seg.index : '?'} ${seg ? seg.lyrics : ''}</div>
+                        </div>
+                        <div class="rec-like" data-id="${rec.id}">
+                            ❤ <span>${rec.likes}</span>
+                        </div>
                     </div>
-                    <div class="rec-like" data-id="${rec.id}">
-                        ❤ <span>${rec.likes}</span>
-                    </div>
+                    <div class="rec-wave-container" id="taskRecW${i}"></div>
                 </div>
             `;
         });
         recordingList.innerHTML = html;
 
+        // 初始化 WaveSurfer
+        list.forEach((rec, i) => {
+            const el = document.getElementById(`taskRecW${i}`);
+            if (!el || typeof WaveSurfer === 'undefined') return;
+            const audioUrl = `${API_BASE.replace('/api', '')}${rec.audio_url}`;
+            const ws = WaveSurfer.create({
+                container: el,
+                waveColor: '#cbd5e1',
+                progressColor: '#07c160',
+                cursorWidth: 0,
+                height: 36,
+                barWidth: 2,
+                barGap: 1,
+                barRadius: 1,
+                normalize: true,
+                interact: false,
+                hideScrollbar: true,
+                url: audioUrl,
+            });
+            _taskRecWsList[i] = ws;
+        });
+
         // 绑定播放
+        let _playingIdx = -1;
         recordingList.querySelectorAll('.btn-play-mini').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const url = btn.dataset.url;
-                if (AudioManager.isPlaying()) {
-                    AudioManager.stop();
-                    recordingList.querySelectorAll('.btn-play-mini').forEach(b => {
-                        b.textContent = '▶';
-                        b.classList.remove('playing');
-                    });
-                    resetPlayButtons();
-                    isFullPlaying = false;
-                } else {
-                    AudioManager.stop();
-                    resetPlayButtons();
-                    isFullPlaying = false;
-                    AudioManager.play(url, () => {
-                        btn.textContent = '▶';
-                        btn.classList.remove('playing');
-                    });
-                    btn.textContent = '⏹';
-                    btn.classList.add('playing');
+                const idx = parseInt(btn.dataset.recIdx);
+                const ws = _taskRecWsList[idx];
+
+                // 停止之前的
+                if (_playingIdx >= 0 && _taskRecWsList[_playingIdx]) {
+                    const prevWs = _taskRecWsList[_playingIdx];
+                    if (prevWs.isPlaying()) prevWs.stop();
+                    const prevBtn = recordingList.querySelector(`.btn-play-mini[data-rec-idx="${_playingIdx}"]`);
+                    if (prevBtn) { prevBtn.textContent = '▶'; prevBtn.classList.remove('playing'); }
                 }
+                AudioManager.stop();
+                resetPlayButtons();
+                isFullPlaying = false;
+
+                if (_playingIdx === idx) {
+                    _playingIdx = -1;
+                    return;
+                }
+
+                if (!ws) return;
+                ws.un('finish');
+                ws.on('finish', () => {
+                    btn.textContent = '▶';
+                    btn.classList.remove('playing');
+                    _playingIdx = -1;
+                });
+                ws.play();
+                btn.textContent = '⏹';
+                btn.classList.add('playing');
+                _playingIdx = idx;
             });
         });
 

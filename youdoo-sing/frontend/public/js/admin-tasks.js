@@ -25,7 +25,7 @@ async function renderTasks(container) {
             <div class="card-header"><h3>录音提交</h3></div>
             <div class="card-body" style="padding:0;">
                 <div class="table-wrap"><table>
-                    <thead><tr><th>用户</th><th>唱段</th><th>歌曲</th><th>评分</th><th>已提交</th><th>已选定</th><th>赞</th><th>操作</th></tr></thead>
+                    <thead><tr><th>用户</th><th>唱段</th><th>歌曲</th><th>评分</th><th>提交时间</th><th>已提交</th><th>已选定</th><th>操作</th></tr></thead>
                     <tbody id="recTableBody"></tbody>
                 </table></div>
             </div>
@@ -69,20 +69,47 @@ async function loadTaskData(songs) {
         const recRes = await aGet(recPath);
         const recs = recRes.data || [];
         const recBody = document.getElementById('recTableBody');
-        recBody.innerHTML = recs.map(r => `<tr>
+        recBody.innerHTML = recs.map((r, i) => `<tr>
             <td>${r.user_name}</td>
             <td>${r.segment_id}</td>
             <td>${r.song_id}</td>
             <td>⭐ ${r.score}</td>
+            <td style="font-size:12px;color:var(--text-secondary);font-family:monospace;">${r.created_at || '--'}</td>
             <td>${r.submitted ? '<span class="badge badge-submitted">已提交</span>' : '<span class="badge badge-unassigned">未提交</span>'}</td>
             <td>${r.selected ? '<span class="badge badge-completed">已选定</span>' : '--'}</td>
-            <td>${r.likes}</td>
             <td>
-                <button class="btn btn-outline btn-sm" onclick="playRecording('${r.audio_url}',this)">▶</button>
+                <div class="rec-wave-mini" id="taskRecWave${i}" style="height:28px;min-width:120px;display:inline-block;vertical-align:middle;border-radius:4px;overflow:hidden;"></div>
+                <button class="btn btn-outline btn-sm" onclick="playTaskRec(${i},this)">▶</button>
                 ${!r.selected?`<button class="btn btn-success btn-sm" onclick="selectRecording('${r.id}')">选定</button>`:''}
                 <button class="btn btn-danger btn-sm" onclick="deleteRecording('${r.id}')">删除</button>
             </td>
         </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-light);">暂无录音</td></tr>';
+
+        // 为每条录音初始化 WaveSurfer 波形
+        window._taskRecWS = window._taskRecWS || [];
+        window._taskRecWS.forEach(ws => { try { ws.destroy(); } catch(e){} });
+        window._taskRecWS = [];
+        recs.forEach((r, i) => {
+            const el = document.getElementById(`taskRecWave${i}`);
+            if (!el || typeof WaveSurfer === 'undefined') return;
+            const audioUrl = `${API.replace('/api', '')}${r.audio_url}`;
+            const ws = WaveSurfer.create({
+                container: el,
+                waveColor: 'rgba(100,116,139,0.4)',
+                progressColor: '#4f46e5',
+                cursorWidth: 0,
+                height: 28,
+                barWidth: 2,
+                barGap: 1,
+                barRadius: 1,
+                normalize: true,
+                interact: false,
+                hideScrollbar: true,
+                url: audioUrl,
+            });
+            ws._recData = r;
+            window._taskRecWS[i] = ws;
+        });
     } catch (e) { showToast(e.message, 'error'); }
 }
 
@@ -102,15 +129,34 @@ async function reopenSegment(segId) {
     } catch (e) { showToast(e.message, 'error'); }
 }
 
-let _taskAudio = null;
-function playRecording(url, btn) {
-    if (_taskAudio) { _taskAudio.pause(); _taskAudio = null; btn.textContent = '▶'; return; }
-    const fullUrl = `${API.replace('/api', '')}${url}`;
-    _taskAudio = new Audio(fullUrl);
-    _taskAudio.onerror = () => { _taskAudio = null; btn.textContent = '▶'; showToast('音频加载失败'); };
-    _taskAudio.onended = () => { _taskAudio = null; btn.textContent = '▶'; };
-    _taskAudio.play().catch(() => { _taskAudio = null; btn.textContent = '▶'; });
+let _taskPlayingIdx = -1;
+function playTaskRec(idx, btn) {
+    // 停止之前播放的
+    if (_taskPlayingIdx >= 0 && window._taskRecWS[_taskPlayingIdx]) {
+        const prev = window._taskRecWS[_taskPlayingIdx];
+        if (prev.isPlaying()) prev.stop();
+        const prevBtn = document.querySelector(`#taskRecWave${_taskPlayingIdx}`)?.closest('td')?.querySelector('.btn-outline');
+        if (prevBtn) prevBtn.textContent = '▶';
+    }
+
+    const ws = window._taskRecWS[idx];
+    if (!ws) { showToast('波形未就绪'); return; }
+
+    if (_taskPlayingIdx === idx && ws.isPlaying()) {
+        ws.stop();
+        btn.textContent = '▶';
+        _taskPlayingIdx = -1;
+        return;
+    }
+
+    ws.un('finish');
+    ws.on('finish', () => {
+        btn.textContent = '▶';
+        _taskPlayingIdx = -1;
+    });
+    ws.play();
     btn.textContent = '⏹';
+    _taskPlayingIdx = idx;
 }
 
 async function selectRecording(recId) {

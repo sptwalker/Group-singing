@@ -9,7 +9,7 @@ const AudioManager = {
     play(src, onEnd, onTimeUpdate) {
         this.stop();
         const audio = new Audio(src);
-        audio.crossOrigin = 'anonymous';
+        if (!src.startsWith('blob:')) audio.crossOrigin = 'anonymous';
         this._current = audio;
         audio.onplay = () => {
             if (this._onStop) this._onStop('playing');
@@ -42,9 +42,8 @@ const AudioManager = {
     playRange(src, startTime, endTime, onEnd, onTimeUpdate) {
         this.stop();
         const audio = new Audio(src);
-        audio.crossOrigin = 'anonymous';
+        if (!src.startsWith('blob:')) audio.crossOrigin = 'anonymous';
         this._current = audio;
-        audio.currentTime = startTime;
 
         const checkTime = () => {
             if (audio.currentTime >= endTime) {
@@ -76,7 +75,27 @@ const AudioManager = {
             this._onStop = null;
             showToast('音频加载失败');
         };
-        audio.play().catch(() => showToast('播放失败'));
+
+        const doPlay = () => {
+            const doSeekAndPlay = () => {
+                if (Math.abs(audio.currentTime - startTime) > 0.5) {
+                    audio.addEventListener('seeked', () => {
+                        audio.play().catch(() => showToast('播放失败'));
+                    }, { once: true });
+                    audio.currentTime = startTime;
+                } else {
+                    audio.currentTime = startTime;
+                    audio.play().catch(() => showToast('播放失败'));
+                }
+            };
+            doSeekAndPlay();
+        };
+        if (audio.readyState >= 1) {
+            doPlay();
+        } else {
+            audio.preload = 'auto';
+            audio.addEventListener('loadedmetadata', doPlay, { once: true });
+        }
         return audio;
     },
 
