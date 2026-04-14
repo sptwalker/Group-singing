@@ -109,7 +109,7 @@ function initAuth() {
 }
 
 // ===== 模块路由 =====
-const MODULE_TITLES = { dashboard: '仪表盘', songs: '歌曲库', editor: '分段编辑器', tasks: '任务管理', export: '合成导出' };
+const MODULE_TITLES = { dashboard: '仪表盘', songs: '歌曲库', editor: '分段编辑器', tasks: '任务管理', export: '合成导出', finals: '最终成曲' };
 let currentModule = '';
 
 function switchModule(name) {
@@ -120,7 +120,7 @@ function switchModule(name) {
     document.querySelector('.sidebar').classList.remove('open');
     const container = document.getElementById('moduleContainer');
     container.innerHTML = '<div class="loading">加载中</div>';
-    const loaders = { dashboard: renderDashboard, songs: renderSongs, editor: renderEditor, tasks: renderTasks, export: renderExport };
+    const loaders = { dashboard: renderDashboard, songs: renderSongs, editor: renderEditor, tasks: renderTasks, export: renderExport, finals: renderFinals };
     if (loaders[name]) loaders[name](container);
 }
 

@@ -322,6 +322,196 @@ let _expIsPlaying = false;
 let _expRAF = 0;
 let _expAccUrl = null;      // 伴奏URL（检测通过后设置）
 
+// ---- Web Audio API 实时音效预览 ----
+let _expAudioCtx = null;       // AudioContext 单例
+let _expFxNodes = [];          // 每个录音卡片的音效节点链 [{source, pitchNode, reverbGain, dryGain, wetGain, convolver, gainOut}]
+let _expFxBuffers = [];        // 缓存的 AudioBuffer
+let _expFxPlaying = null;      // 当前正在播放的音效源 {source, startTime, idx}
+
+function _expGetAudioCtx() {
+    if (!_expAudioCtx || _expAudioCtx.state === 'closed') {
+        _expAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (_expAudioCtx.state === 'suspended') _expAudioCtx.resume();
+    return _expAudioCtx;
+}
+
+// 创建简易脉冲响应（模拟混响）
+function _expCreateReverbIR(ctx, duration, decay) {
+    const rate = ctx.sampleRate;
+    const len = Math.floor(rate * duration);
+    const ir = ctx.createBuffer(2, len, rate);
+    for (let ch = 0; ch < 2; ch++) {
+        const data = ir.getChannelData(ch);
+        for (let i = 0; i < len; i++) {
+            data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+        }
+    }
+    return ir;
+}
+
+// 缓存不同混响等级的IR
+let _expReverbIRCache = {};
+function _expGetReverbIR(ctx, reverbPct) {
+    // 将混响百分比映射到持续时间和衰减
+    const duration = 0.5 + (reverbPct / 100) * 2.5; // 0.5s ~ 3s
+    const decay = 3 - (reverbPct / 100) * 1.5;       // 3 ~ 1.5
+    const key = `${Math.round(duration*10)}_${Math.round(decay*10)}`;
+    if (!_expReverbIRCache[key]) {
+        _expReverbIRCache[key] = _expCreateReverbIR(ctx, duration, decay);
+    }
+    return _expReverbIRCache[key];
+}
+
+// 加载音频文件到 AudioBuffer
+async function _expLoadAudioBuffer(url) {
+    const ctx = _expGetAudioCtx();
+    const resp = await fetch(url);
+    const arrayBuf = await resp.arrayBuffer();
+    return await ctx.decodeAudioData(arrayBuf);
+}
+
+// 使用 Web Audio API 播放录音（带音效）
+async function _expPlayRecWithFx(idx) {
+    const seg = _expSegs[_expActiveSegIdx];
+    if (!seg) return;
+    const recs = seg._recs || [];
+    const rec = recs[idx];
+    if (!rec) return;
+
+    const ctx = _expGetAudioCtx();
+    const url = _expBuildUrl(rec.audio_url);
+
+    // 加载或使用缓存的 AudioBuffer
+    if (!_expFxBuffers[idx]) {
+        try {
+            _expFxBuffers[idx] = await _expLoadAudioBuffer(url);
+        } catch (e) {
+            showToast('音频加载失败', 'error');
+            return;
+        }
+    }
+    const buffer = _expFxBuffers[idx];
+
+    // 停止之前的播放
+    _expStopFxPlayback();
+
+    // 创建音效链：source → pitchShift(playbackRate) → dry/wet split → convolver → merge → destination
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+
+    // 音高：通过 detune 实现半音偏移（100 cents = 1 semitone），不改变速度
+    const pitchShift = rec._pitchShift || 0;
+    source.detune.value = pitchShift * 100; // cents
+
+    // 混响效果
+    const reverbPct = rec._reverb || 0;
+    const dryGain = ctx.createGain();
+    const wetGain = ctx.createGain();
+    const convolver = ctx.createConvolver();
+    const merger = ctx.createGain();
+
+    // 干湿比
+    const wetRatio = reverbPct / 100;
+    dryGain.gain.value = 1 - wetRatio * 0.5; // 干声保持较高
+    wetGain.gain.value = wetRatio;
+
+    if (reverbPct > 0) {
+        convolver.buffer = _expGetReverbIR(ctx, reverbPct);
+    }
+
+    // 连接：source → dryGain → merger → destination
+    //        source → convolver → wetGain → merger
+    source.connect(dryGain);
+    dryGain.connect(merger);
+
+    if (reverbPct > 0) {
+        source.connect(convolver);
+        convolver.connect(wetGain);
+        wetGain.connect(merger);
+    }
+
+    merger.connect(ctx.destination);
+
+    source.start(0);
+
+    _expFxPlaying = {
+        source, idx, dryGain, wetGain, convolver, merger,
+        startTime: ctx.currentTime,
+        duration: buffer.duration
+    };
+
+    // 同步 WaveSurfer 进度显示
+    const ws = _expRecWS[idx];
+    if (ws) {
+        // 用 RAF 同步 WaveSurfer 的进度条
+        const totalDur = buffer.duration;
+        const tick = () => {
+            if (!_expFxPlaying || _expFxPlaying.idx !== idx) return;
+            const elapsed = ctx.currentTime - _expFxPlaying.startTime;
+            if (elapsed >= totalDur) {
+                // 播放结束
+                const btn = document.querySelector(`.rec-play-btn[data-idx="${idx}"]`);
+                if (btn) btn.textContent = '▶';
+                _expPlayingRecIdx = -1;
+                _expFxPlaying = null;
+                try { ws.seekTo(0); } catch(e){}
+                return;
+            }
+            try { ws.seekTo(elapsed / totalDur); } catch(e){}
+            requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    }
+
+    source.onended = () => {
+        if (_expFxPlaying && _expFxPlaying.idx === idx) {
+            const btn = document.querySelector(`.rec-play-btn[data-idx="${idx}"]`);
+            if (btn) btn.textContent = '▶';
+            _expPlayingRecIdx = -1;
+            _expFxPlaying = null;
+        }
+    };
+}
+
+function _expStopFxPlayback() {
+    if (_expFxPlaying) {
+        try { _expFxPlaying.source.stop(); } catch(e){}
+        try { _expFxPlaying.source.disconnect(); } catch(e){}
+        try { _expFxPlaying.dryGain.disconnect(); } catch(e){}
+        try { _expFxPlaying.wetGain.disconnect(); } catch(e){}
+        try { _expFxPlaying.convolver.disconnect(); } catch(e){}
+        try { _expFxPlaying.merger.disconnect(); } catch(e){}
+        _expFxPlaying = null;
+    }
+}
+
+// 实时更新正在播放的音效参数
+function _expUpdateFxParams(idx, rec) {
+    if (!_expFxPlaying || _expFxPlaying.idx !== idx) return;
+    const ctx = _expGetAudioCtx();
+
+    // 更新音高
+    const pitchShift = rec._pitchShift || 0;
+    try { _expFxPlaying.source.detune.value = pitchShift * 100; } catch(e){}
+
+    // 更新混响干湿比
+    const reverbPct = rec._reverb || 0;
+    const wetRatio = reverbPct / 100;
+    _expFxPlaying.dryGain.gain.setValueAtTime(1 - wetRatio * 0.5, ctx.currentTime);
+    _expFxPlaying.wetGain.gain.setValueAtTime(wetRatio, ctx.currentTime);
+
+    // 如果之前没有混响但现在需要，需要重新连接
+    if (reverbPct > 0 && _expFxPlaying.convolver.buffer === null) {
+        _expFxPlaying.convolver.buffer = _expGetReverbIR(ctx, reverbPct);
+        try {
+            _expFxPlaying.source.connect(_expFxPlaying.convolver);
+            _expFxPlaying.convolver.connect(_expFxPlaying.wetGain);
+            _expFxPlaying.wetGain.connect(_expFxPlaying.merger);
+        } catch(e){}
+    }
+}
+
 const EXP_SEG_COLORS = ['#10b981','#3b82f6','#f59e0b','#8b5cf6','#ec4899','#06b6d4'];
 const EXP_MIN_SEG_PX = 90; // 最小唱段像素宽度，确保能放迷你卡片
 
@@ -381,8 +571,7 @@ async function _expLoadSong() {
         // 检查是否已有伴奏
         if (_expSong.accompaniment_url) {
             _expAccUrl = _expBuildUrl(_expSong.accompaniment_url);
-            if (accStatus) accStatus.innerHTML = `<span class="acc-status pass">伴奏已上传 (${_expSong.accompaniment_duration?.toFixed(1)||'?'}s)</span>
-                <button class="btn btn-danger btn-sm" onclick="_expDeleteAcc()" style="margin-left:4px;font-size:11px;padding:2px 8px;">删除</button>`;
+            if (accStatus) accStatus.innerHTML = '';
             _expRenderPlaybar();
             _expRenderWavePanel();
             _expRenderRecPanel();
@@ -400,6 +589,7 @@ async function _expLoadSong() {
 
 function _expCleanup() {
     _expStopAllPlayback();
+    _expStopFxPlayback();
     _expDestroyRecWS();
     _expDestroyMiniWS();
     if (_expWS) { try { _expWS.destroy(); } catch(e){} _expWS = null; }
@@ -410,6 +600,8 @@ function _expCleanup() {
     _expSong = null; _expSegs = []; _expActiveSegIdx = -1;
     _expIsPlaying = false; _expPlayingRecIdx = -1;
     _expAccUrl = null;
+    _expFxBuffers = [];
+    _expFxNodes = [];
 }
 
 function _expDestroyRecWS() {
@@ -422,6 +614,7 @@ function _expDestroyMiniWS() {
 }
 function _expStopAllPlayback() {
     if (_expAudio && !_expAudio.paused) _expAudio.pause();
+    _expStopFxPlayback();
     _expRecWS.forEach(ws => { try { if(ws.isPlaying()) ws.stop(); } catch(e){} });
     _expMiniWS.forEach(ws => { try { if(ws.isPlaying()) ws.stop(); } catch(e){} });
     _expPlayingRecIdx = -1;
@@ -762,6 +955,8 @@ function _expRenderRecPanel() {
 function _expRenderRecDetail() {
     _expDestroyRecWS();
     _expStopRecPlayback();
+    _expStopFxPlayback();
+    _expFxBuffers = [];  // 切换唱段时清理音频缓存
     const body = document.getElementById('expRecBody');
     const title = document.getElementById('expRecTitle');
     const hint = document.getElementById('expRecHint');
@@ -793,6 +988,8 @@ function _expRenderRecDetail() {
         let disabled = '';
         if (!isChorus && !r.selected && recs.some(x => x.selected)) disabled = 'disabled';
         if (isChorus && !r.selected && selectedCount >= 20) disabled = 'disabled';
+        const pitchShift = r._pitchShift || 0;
+        const reverb = r._reverb || 0;
         return `<div class="rec-card-lg ${r.selected?'selected':''}" data-rec-idx="${i}">
             <div class="rec-top">
                 <input type="checkbox" class="rec-check" data-rec-id="${r.id}" ${checked} ${disabled}
@@ -805,6 +1002,17 @@ function _expRenderRecDetail() {
             <div class="rec-wave-wrap" id="expRecW${i}"></div>
             <div class="rec-bottom">
                 <button class="rec-play-btn" data-idx="${i}" title="播放">▶</button>
+                <div class="rec-ctrl-group">
+                    <span class="rec-ctrl-label">升降调</span>
+                    <button class="rec-pitch-btn" data-idx="${i}" data-dir="-1" title="降调">-</button>
+                    <span class="rec-pitch-val" id="expPitch${i}">${pitchShift > 0 ? '+' + pitchShift : pitchShift}</span>
+                    <button class="rec-pitch-btn" data-idx="${i}" data-dir="1" title="升调">+</button>
+                </div>
+                <div class="rec-ctrl-group rec-ctrl-reverb">
+                    <span class="rec-ctrl-label">混响</span>
+                    <input type="range" class="rec-reverb-slider" data-idx="${i}" min="0" max="100" value="${reverb}">
+                    <span class="rec-reverb-val" id="expReverb${i}">${reverb}%</span>
+                </div>
                 <div class="rec-score">${score !== '--' ? score+'分' : '--'}</div>
             </div>
         </div>`;
@@ -836,6 +1044,36 @@ function _expRenderRecDetail() {
         btn.addEventListener('click', () => _expPlayRec(parseInt(btn.dataset.idx)));
     });
 
+    // 绑定升降调按钮
+    body.querySelectorAll('.rec-pitch-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const idx = parseInt(btn.dataset.idx);
+            const dir = parseInt(btn.dataset.dir);
+            const rec = recs[idx];
+            if (!rec) return;
+            rec._pitchShift = (rec._pitchShift || 0) + dir;
+            rec._pitchShift = Math.max(-12, Math.min(12, rec._pitchShift));
+            const el = document.getElementById(`expPitch${idx}`);
+            if (el) el.textContent = rec._pitchShift > 0 ? '+' + rec._pitchShift : String(rec._pitchShift);
+            // 实时更新音效
+            _expUpdateFxParams(idx, rec);
+        });
+    });
+
+    // 绑定混响滑块
+    body.querySelectorAll('.rec-reverb-slider').forEach(slider => {
+        slider.addEventListener('input', () => {
+            const idx = parseInt(slider.dataset.idx);
+            const rec = recs[idx];
+            if (!rec) return;
+            rec._reverb = parseInt(slider.value);
+            const el = document.getElementById(`expReverb${idx}`);
+            if (el) el.textContent = rec._reverb + '%';
+            // 实时更新音效
+            _expUpdateFxParams(idx, rec);
+        });
+    });
+
     // 初始化波形
     _expInitRecWS(recs);
 }
@@ -862,6 +1100,7 @@ function _expInitRecWS(recs) {
 }
 
 function _expStopRecPlayback() {
+    _expStopFxPlayback();
     if (_expPlayingRecIdx >= 0 && _expRecWS[_expPlayingRecIdx]) {
         try { _expRecWS[_expPlayingRecIdx].stop(); } catch(e){}
         const btn = document.querySelector(`.rec-play-btn[data-idx="${_expPlayingRecIdx}"]`);
@@ -873,14 +1112,25 @@ function _expStopRecPlayback() {
 function _expPlayRec(idx) {
     // 暂停全曲
     if (_expAudio && !_expAudio.paused) _expAudio.pause();
-    // 停止其他录音
+
+    // 如果点击正在播放的录音，停止播放（toggle）
+    if (_expPlayingRecIdx === idx) {
+        _expStopRecPlayback();
+        return;
+    }
+
+    // 停止其他录音（包括音效播放）
     _expStopRecPlayback();
-    const ws = _expRecWS[idx];
-    if (!ws) { showToast('波形未就绪'); return; }
-    ws.play();
+
+    // 始终使用 Web Audio API 播放（支持实时音效预览）
     _expPlayingRecIdx = idx;
     const btn = document.querySelector(`.rec-play-btn[data-idx="${idx}"]`);
     if (btn) btn.textContent = '⏸';
+    _expPlayRecWithFx(idx).catch(e => {
+        showToast('播放失败: ' + e.message, 'error');
+        _expPlayingRecIdx = -1;
+        if (btn) btn.textContent = '▶';
+    });
 }
 
 function _expPlayRecById(recId) {
@@ -935,8 +1185,86 @@ function _expUpdateStatus() {
     if (btn) btn.disabled = !allOk;
 }
 
-function _expStartSynth() {
-    showToast('合成功能开发中...', 'warning');
+async function _expStartSynth() {
+    if (!_expSong || !_expSegs.length) return;
+    // 收集所有录音的升降调和混响参数
+    const recParams = {};
+    _expSegs.forEach(seg => {
+        (seg._recs || []).forEach(r => {
+            if (r.selected) {
+                recParams[r.id] = {
+                    pitchShift: r._pitchShift || 0,
+                    reverb: r._reverb || 0,
+                };
+            }
+        });
+    });
+    // 显示合成进度对话框
+    showModal('合成进度', `
+        <div class="synth-progress-wrap">
+            <div class="synth-step-list" id="synthStepList"></div>
+            <div class="synth-progress-bar"><div class="synth-progress-fill" id="synthProgressFill"></div></div>
+            <div class="synth-progress-text" id="synthProgressText">准备中...</div>
+        </div>
+    `, '');
+    _renderSynthSteps(0);
+    try {
+        await aPost(`/admin/songs/${_expSong.id}/synthesize`, { rec_params: recParams });
+        // 开始轮询状态
+        _pollSynthStatus(_expSong.id);
+    } catch (e) {
+        closeModal();
+        showToast(e.message, 'error');
+    }
+}
+
+const _SYNTH_STEP_NAMES = ['降噪处理', '节奏对齐', '音高修正', '响度均衡', '人声增强', '空间效果', '合唱增强', '最终混音'];
+
+function _renderSynthSteps(currentStep) {
+    const list = document.getElementById('synthStepList');
+    if (!list) return;
+    list.innerHTML = _SYNTH_STEP_NAMES.map((name, i) => {
+        let cls = 'synth-step';
+        if (i < currentStep) cls += ' done';
+        else if (i === currentStep) cls += ' active';
+        return `<div class="${cls}"><span class="synth-step-num">${i + 1}</span><span>${name}</span></div>`;
+    }).join('');
+}
+
+let _synthPollTimer = null;
+function _pollSynthStatus(songId) {
+    if (_synthPollTimer) clearInterval(_synthPollTimer);
+    _synthPollTimer = setInterval(async () => {
+        try {
+            const res = await aGet(`/admin/songs/${songId}/synth-status`);
+            const data = res.data;
+            if (!data || data.status === 'none') return;
+            // 更新进度
+            const fill = document.getElementById('synthProgressFill');
+            const text = document.getElementById('synthProgressText');
+            if (fill) fill.style.width = (data.progress || 0) + '%';
+            if (text) text.textContent = data.message || '';
+            _renderSynthSteps(data.step || 0);
+
+            if (data.status === 'done') {
+                clearInterval(_synthPollTimer);
+                _synthPollTimer = null;
+                setTimeout(() => {
+                    closeModal();
+                    showToast('合成完成！', 'success');
+                    // 跳转到最终成曲页面
+                    switchModule('finals');
+                }, 1200);
+            } else if (data.status === 'error') {
+                clearInterval(_synthPollTimer);
+                _synthPollTimer = null;
+                closeModal();
+                showToast(`合成失败: ${data.error || '未知错误'}`, 'error');
+            }
+        } catch (e) {
+            console.error('poll synth status error:', e);
+        }
+    }, 1000);
 }
 
 // ---- 伴奏上传 ----
@@ -1014,4 +1342,116 @@ function _expTickRecAudios() {
             if (!a.paused) { try { a.pause(); } catch(e){} }
         }
     });
+}
+
+// ===== 最终成曲模块 =====
+let _finalsPlayingAudio = null;
+let _finalsPlayingId = null;
+
+async function renderFinals(container) {
+    try {
+        const res = await aGet('/admin/finals');
+        const finals = res.data || [];
+        container.innerHTML = `
+        <div class="finals-header">
+            <h3>最终成曲列表</h3>
+            <span class="finals-count">${finals.length} 首成曲</span>
+        </div>
+        <div class="finals-list" id="finalsList">
+            ${finals.length ? finals.map(f => _renderFinalCard(f)).join('') : '<div class="empty-state"><div class="empty-icon">🎵</div><p>暂无成曲，请在"合成导出"页面完成合成</p></div>'}
+        </div>`;
+        // 绑定事件
+        _bindFinalsEvents();
+    } catch (e) {
+        container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>${e.message}</p></div>`;
+    }
+}
+
+function _renderFinalCard(f) {
+    const statusBadge = f.published
+        ? '<span class="badge badge-completed">已发布</span>'
+        : '<span class="badge badge-unassigned">未发布</span>';
+    const publishBtn = f.published
+        ? `<button class="btn btn-outline btn-sm" data-action="unpublish" data-id="${f.id}">取消发布</button>`
+        : `<button class="btn btn-success btn-sm" data-action="publish" data-id="${f.id}">发布</button>`;
+    return `
+    <div class="final-card" data-final-id="${f.id}">
+        <div class="final-card-left">
+            <button class="final-play-btn" data-action="play" data-id="${f.id}" data-url="${f.audio_url}" title="播放">▶</button>
+            <div class="final-info">
+                <div class="final-title">${f.song_title || '未命名'} <span class="final-artist">${f.song_artist || ''}</span></div>
+                <div class="final-meta">
+                    ${statusBadge}
+                    <span>${f.segment_count || 0} 唱段</span>
+                    <span>${f.track_count || 0} 轨</span>
+                    <span>${fmtTime(f.duration || 0)}</span>
+                    <span class="final-date">${f.created_at || ''}</span>
+                </div>
+            </div>
+        </div>
+        <div class="final-card-right">
+            ${publishBtn}
+            <button class="btn btn-danger btn-sm" data-action="delete" data-id="${f.id}">删除</button>
+        </div>
+    </div>`;
+}
+
+function _bindFinalsEvents() {
+    const list = document.getElementById('finalsList');
+    if (!list) return;
+    list.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const action = btn.dataset.action;
+        const id = btn.dataset.id;
+        if (action === 'play') {
+            _toggleFinalPlay(btn, id, btn.dataset.url);
+        } else if (action === 'publish') {
+            try {
+                await aPost(`/admin/finals/${id}/publish`, {});
+                showToast('已发布', 'success');
+                renderFinals(document.getElementById('moduleContainer'));
+            } catch (e) { showToast(e.message, 'error'); }
+        } else if (action === 'unpublish') {
+            try {
+                await aPost(`/admin/finals/${id}/unpublish`, {});
+                showToast('已取消发布', 'success');
+                renderFinals(document.getElementById('moduleContainer'));
+            } catch (e) { showToast(e.message, 'error'); }
+        } else if (action === 'delete') {
+            if (!confirm('确定删除该成曲？此操作不可恢复。')) return;
+            try {
+                await aDel(`/admin/finals/${id}`);
+                showToast('已删除', 'success');
+                renderFinals(document.getElementById('moduleContainer'));
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+    });
+}
+
+function _toggleFinalPlay(btn, id, url) {
+    // 停止当前播放
+    if (_finalsPlayingAudio) {
+        _finalsPlayingAudio.pause();
+        _finalsPlayingAudio.src = '';
+        const prevBtn = document.querySelector(`.final-play-btn[data-id="${_finalsPlayingId}"]`);
+        if (prevBtn) prevBtn.textContent = '▶';
+        if (_finalsPlayingId === id) {
+            _finalsPlayingAudio = null;
+            _finalsPlayingId = null;
+            return;
+        }
+    }
+    const fullUrl = _expBuildUrl(url);
+    const audio = new Audio(fullUrl);
+    audio.crossOrigin = 'anonymous';
+    audio.addEventListener('ended', () => {
+        btn.textContent = '▶';
+        _finalsPlayingAudio = null;
+        _finalsPlayingId = null;
+    });
+    audio.play().catch(() => {});
+    btn.textContent = '⏸';
+    _finalsPlayingAudio = audio;
+    _finalsPlayingId = id;
 }

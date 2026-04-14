@@ -1313,7 +1313,7 @@ tbody tr:last-child td { border-bottom: none; }
 .export-rec-empty { text-align:center; padding:40px 16px; color:var(--text-light); font-size:13px; }
 
 /* 大录音卡片 */
-.rec-card-lg { display:flex; flex-direction:column; gap:6px; padding:10px; background:var(--bg-main); border:1.5px solid var(--border); border-radius:8px; transition:border-color .15s, box-shadow .15s; }
+.rec-card-lg { display:flex; flex-direction:column; gap:4px; padding:8px 10px; background:var(--bg-main); border:1.5px solid var(--border); border-radius:8px; transition:border-color .15s, box-shadow .15s; }
 .rec-card-lg:hover { border-color:var(--primary-light); }
 .rec-card-lg.selected { border-color:var(--primary); box-shadow:0 0 0 2px rgba(79,70,229,.15); background:#f5f3ff; }
 .rec-card-lg .rec-check { width:16px; height:16px; accent-color:var(--primary); cursor:pointer; flex-shrink:0; }
@@ -1321,16 +1321,25 @@ tbody tr:last-child td { border-bottom: none; }
 .rec-card-lg .rec-info { flex:1; min-width:0; }
 .rec-card-lg .rec-info .rec-user { font-weight:600; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .rec-card-lg .rec-info .rec-time { font-size:10px; color:var(--text-light); font-family:monospace; }
-.rec-card-lg .rec-wave-wrap { width:100%; height:32px; border-radius:4px; overflow:hidden; }
-.rec-card-lg .rec-bottom { display:flex; align-items:center; justify-content:space-between; }
-.rec-card-lg .rec-play-btn { width:28px; height:28px; border-radius:50%; border:none; background:var(--primary); color:#fff; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background .15s; }
-.rec-card-lg .rec-play-btn:hover { background:var(--primary-dark); }
-.rec-card-lg .rec-score { font-size:11px; color:var(--text-secondary); }
+.rec-card-lg .rec-wave-wrap { width:100%; height:26px; border-radius:4px; overflow:hidden; }
+.rec-card-lg .rec-bottom { display:flex; align-items:center; gap:12px; }
+.rec-card-lg .rec-play-btn { width:24px; height:24px; border-radius:50%; border:none; background:var(--primary); color:#fff; font-size:10px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background .15s; }
+.rec-card-lg .rec-play-btn:hover { background:#4338ca; }
+.rec-card-lg .rec-score { font-size:10px; color:var(--text-secondary); flex-shrink:0; margin-left:auto; }
+.rec-card-lg .rec-ctrl-group { display:flex; align-items:center; gap:4px; flex-shrink:0; }
+.rec-card-lg .rec-ctrl-group.rec-ctrl-reverb { flex:1; min-width:0; }
+.rec-card-lg .rec-ctrl-group.rec-ctrl-reverb .rec-reverb-slider { flex:1; min-width:60px; }
+.rec-ctrl-label { font-size:10px; color:var(--text-secondary); white-space:nowrap; flex-shrink:0; }
+.rec-pitch-btn { width:18px; height:18px; border-radius:3px; border:1.5px solid var(--border); background:var(--card); color:var(--text); font-size:11px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .15s; line-height:1; padding:0; }
+.rec-pitch-btn:hover { border-color:var(--primary); color:var(--primary); background:var(--primary-bg); }
+.rec-pitch-val { font-size:10px; font-weight:600; font-family:monospace; min-width:18px; text-align:center; color:var(--text); }
+.rec-reverb-slider { height:4px; accent-color:var(--primary); min-width:0; cursor:pointer; }
+.rec-reverb-val { font-size:9px; color:var(--text-secondary); font-family:monospace; min-width:24px; text-align:right; }
 
 /* 全曲播放条 */
 .export-playbar { display:flex; align-items:center; gap:10px; padding:8px 16px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; margin-bottom:16px; }
 .export-playbar .play-btn-main { width:36px; height:36px; border-radius:50%; border:none; background:var(--primary); color:#fff; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.export-playbar .play-btn-main:hover { background:var(--primary-dark); }
+.export-playbar .play-btn-main:hover { background:#4338ca; }
 .export-playbar .playbar-time { font-size:12px; font-family:monospace; color:var(--text-secondary); min-width:100px; }
 .export-playbar .playbar-track { flex:1; height:4px; background:var(--border); border-radius:2px; position:relative; cursor:pointer; }
 .export-playbar .playbar-fill { height:100%; background:var(--primary); border-radius:2px; transition:width .1s linear; }
@@ -1374,6 +1383,18 @@ tbody tr:last-child td { border-bottom: none; }
     font-size: 12px;
     padding: 4px 10px;
 }
+.song-card-acc .acc-del-btn {
+    font-size: 11px;
+    padding: 3px 8px;
+    margin-left: 8px;
+    color: #dc2626;
+    border-color: #fca5a5;
+}
+.song-card-acc .acc-del-btn:hover {
+    background: #fef2f2;
+    border-color: #dc2626;
+    color: #b91c1c;
+}
 
 /* 音频文件丢失的歌曲卡片 */
 .song-card-missing {
@@ -1391,6 +1412,36 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* 录音卡片空状态跨列 */
 .export-rec-empty { grid-column:1/-1; }
+
+/* ===== 合成进度对话框 ===== */
+.synth-progress-wrap { padding:8px 0; }
+.synth-step-list { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:20px; }
+.synth-step { display:flex; align-items:center; gap:6px; padding:6px 12px; border-radius:20px; font-size:12px; background:var(--border-light); color:var(--text-light); transition:all .2s; }
+.synth-step .synth-step-num { width:20px; height:20px; border-radius:50%; background:var(--border); color:var(--text-light); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; }
+.synth-step.active { background:#e0e7ff; color:var(--primary); font-weight:600; }
+.synth-step.active .synth-step-num { background:var(--primary); color:#fff; }
+.synth-step.done { background:#d1fae5; color:#059669; }
+.synth-step.done .synth-step-num { background:#10b981; color:#fff; }
+.synth-progress-bar { height:8px; background:var(--border-light); border-radius:4px; overflow:hidden; margin-bottom:10px; }
+.synth-progress-fill { height:100%; background:linear-gradient(90deg, var(--primary), var(--primary-light)); border-radius:4px; transition:width .3s ease; width:0%; }
+.synth-progress-text { font-size:13px; color:var(--text-secondary); text-align:center; }
+
+/* ===== 最终成曲模块 ===== */
+.finals-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.finals-header h3 { font-size:17px; font-weight:700; }
+.finals-count { font-size:13px; color:var(--text-secondary); }
+.finals-list { display:flex; flex-direction:column; gap:10px; }
+.final-card { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; background:var(--card); border:1px solid var(--border-light); border-radius:var(--radius); box-shadow:var(--shadow-sm); transition:box-shadow .15s, border-color .15s; gap:12px; }
+.final-card:hover { box-shadow:var(--shadow); border-color:var(--primary-light); }
+.final-card-left { display:flex; align-items:center; gap:14px; flex:1; min-width:0; }
+.final-play-btn { width:40px; height:40px; border-radius:50%; border:none; background:var(--primary); color:#fff; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background .15s; }
+.final-play-btn:hover { background:#4338ca; }
+.final-info { flex:1; min-width:0; }
+.final-title { font-size:15px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.final-artist { font-size:12px; color:var(--text-secondary); font-weight:400; margin-left:6px; }
+.final-meta { display:flex; align-items:center; gap:10px; margin-top:4px; font-size:12px; color:var(--text-light); flex-wrap:wrap; }
+.final-date { font-family:monospace; }
+.final-card-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
 
 /* ===== 响应式 ===== */
 @media (max-width: 768px) {

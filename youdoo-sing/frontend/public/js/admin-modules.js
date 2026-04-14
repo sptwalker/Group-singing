@@ -73,7 +73,7 @@ async function renderSongs(container) {
                 <div class="song-card-progress"><div class="bar" style="width:${s.completion||0}%"></div></div>
                 <div class="song-card-acc">
                     ${s.has_accompaniment
-                        ? `<span class="acc-badge">✅ 有伴奏</span>`
+                        ? `<span class="acc-badge">✅ 有伴奏</span><button class="btn btn-outline btn-sm acc-del-btn" onclick="deleteAccForSong('${s.id}','${s.title.replace(/'/g,"\\\\'")}')" title="删除伴奏后可重新上传">🗑 删除伴奏</button>`
                         : `<button class="btn btn-outline btn-sm acc-upload-btn" onclick="uploadAccForSong('${s.id}','${s.title.replace(/'/g,"\\'")}')">🎹 上传伴奏</button>`
                     }
                 </div>
@@ -267,6 +267,20 @@ async function confirmDeleteSong(songId) {
     try {
         await aDel(`/admin/songs/${songId}`);
         closeModal(); showToast('已删除', 'success');
+        renderSongs(document.getElementById('moduleContainer'));
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ===== 删除伴奏 =====
+function deleteAccForSong(songId, songTitle) {
+    showModal('确认删除伴奏', `<p>确定要删除歌曲 <strong>${songTitle}</strong> 的伴奏吗？删除后可重新上传。</p>`,
+        `<button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-danger" onclick="confirmDeleteAcc('${songId}')">确认删除</button>`);
+}
+async function confirmDeleteAcc(songId) {
+    try {
+        await aDel(`/admin/songs/${songId}/accompaniment`);
+        closeModal();
+        showToast('伴奏已删除', 'success');
         renderSongs(document.getElementById('moduleContainer'));
     } catch (e) { showToast(e.message, 'error'); }
 }

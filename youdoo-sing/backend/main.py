@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.api.routes import router
+import os
 
 app = FastAPI(
     title="YouDoo Sing API",
@@ -20,14 +22,14 @@ app.add_middleware(
 app.include_router(router)
 
 
-@app.get("/")
-async def root():
-    return {"message": "Welcome to YouDoo Sing API"}
-
-
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+# 挂载前端静态文件（放在路由之后，作为兜底）
+_frontend_dir = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'public')
+if os.path.isdir(_frontend_dir):
+    app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")
 
 
 if __name__ == "__main__":

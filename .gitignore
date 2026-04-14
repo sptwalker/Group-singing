@@ -1,1 +1,4 @@
-"venv/"  
+venv/
+server.log
+__pycache__/
+*.pyc

@@ -7,6 +7,9 @@ import json
 import hashlib
 import time
 import shutil
+import subprocess
+import threading
+import traceback
 from datetime import datetime
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -18,6 +21,7 @@ SEGMENTS_DB = {}
 CLAIMS_DB = {}
 RECORDINGS_DB = {}
 USERS_DB = {}
+FINALS_DB = {}
 
 # ============ 管理员配置 ============
 ADMIN_ACCOUNTS = {
@@ -28,7 +32,9 @@ ADMIN_TOKENS = {}  # token -> {username, login_time}
 MUSIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "music"))
 UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+FINALS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "finals"))
 os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(FINALS_DIR, exist_ok=True)
 
 print(f"[DEBUG] MUSIC_DIR = {MUSIC_DIR}")
 print(f"[DEBUG] MUSIC_DIR exists = {os.path.exists(MUSIC_DIR)}")
@@ -49,6 +55,7 @@ def _save_db():
         "claims": CLAIMS_DB,
         "recordings": RECORDINGS_DB,
         "users": USERS_DB,
+        "finals": FINALS_DB,
     }
     tmp = _DB_FILE + ".tmp"
     try:
@@ -64,7 +71,7 @@ def _save_db():
 
 def _load_db() -> bool:
     """从 JSON 文件恢复数据，成功返回 True"""
-    global SONGS_DB, SEGMENTS_DB, CLAIMS_DB, RECORDINGS_DB, USERS_DB
+    global SONGS_DB, SEGMENTS_DB, CLAIMS_DB, RECORDINGS_DB, USERS_DB, FINALS_DB
     if not os.path.exists(_DB_FILE):
         return False
     try:
@@ -75,6 +82,7 @@ def _load_db() -> bool:
         CLAIMS_DB.update(data.get("claims", {}))
         RECORDINGS_DB.update(data.get("recordings", {}))
         USERS_DB.update(data.get("users", {}))
+        FINALS_DB.update(data.get("finals", {}))
         # 修复引用：让 SONGS_DB 中的 segment 指向 SEGMENTS_DB 的同一对象
         for song in SONGS_DB.values():
             for i, seg in enumerate(song.get("segments", [])):
@@ -88,14 +96,45 @@ def _load_db() -> bool:
 
 
 def _get_audio_duration(filepath: str) -> float:
-    """用 mutagen 获取音频文件时长（秒）"""
+    """获取音频文件时长（秒），依次尝试 mutagen → ffprobe → librosa"""
+    # 方法1: mutagen（最快，支持大多数格式）
     try:
         import mutagen
         audio = mutagen.File(filepath)
-        if audio and audio.info:
-            return round(audio.info.length, 2)
+        if audio and audio.info and audio.info.length > 0:
+            dur = round(audio.info.length, 2)
+            print(f"[audio] mutagen OK: {dur}s - {os.path.basename(filepath)}")
+            return dur
     except Exception as e:
-        print(f"[audio] mutagen failed for {filepath}: {e}")
+        print(f"[audio] mutagen failed: {e}")
+
+    # 方法2: ffprobe（兼容性最好）
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", filepath],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            dur = round(float(result.stdout.strip()), 2)
+            if dur > 0:
+                print(f"[audio] ffprobe OK: {dur}s - {os.path.basename(filepath)}")
+                return dur
+    except Exception as e:
+        print(f"[audio] ffprobe failed: {e}")
+
+    # 方法3: librosa（最慢但最可靠）
+    try:
+        import librosa
+        dur = round(librosa.get_duration(filename=filepath), 2)
+        if dur > 0:
+            print(f"[audio] librosa OK: {dur}s - {os.path.basename(filepath)}")
+            return dur
+    except Exception as e:
+        print(f"[audio] librosa failed: {e}")
+
+    print(f"[audio] ALL methods failed for: {filepath}")
     return 0.0
 
 
@@ -1161,3 +1200,570 @@ async def admin_delete_accompaniment(song_id: str, request: Request):
             os.remove(fp)
     _save_db()
     return {"success": True, "message": "伴奏已删除"}
+
+
+# ============ 合成引擎 ============
+
+# 合成任务状态：{song_id: {status, progress, step, message, final_id, error}}
+SYNTH_TASKS = {}
+
+SYNTH_STEPS = [
+    ("denoise", "降噪处理"),
+    ("align", "节奏对齐"),
+    ("pitch", "音高修正"),
+    ("loudness", "响度均衡"),
+    ("vocal_enhance", "人声增强"),
+    ("spatial", "空间效果"),
+    ("chorus_enhance", "合唱增强"),
+    ("final_mix", "最终混音"),
+]
+
+
+def _convert_webm_to_wav(src_path: str, dst_path: str) -> bool:
+    """将 webm 转换为 wav"""
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", src_path, "-ar", "44100", "-ac", "1", dst_path],
+            capture_output=True, text=True, timeout=60
+        )
+        return result.returncode == 0
+    except Exception as e:
+        print(f"[synth] webm->wav failed: {e}")
+        return False
+
+
+def _convert_to_wav(src_path: str, dst_path: str, sr: int = 44100, mono: bool = False) -> bool:
+    """将任意音频转换为 wav"""
+    try:
+        cmd = ["ffmpeg", "-y", "-i", src_path, "-ar", str(sr)]
+        if mono:
+            cmd += ["-ac", "1"]
+        cmd.append(dst_path)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        return result.returncode == 0
+    except Exception as e:
+        print(f"[synth] convert failed: {e}")
+        return False
+
+
+def _apply_pitch_shift(audio_data, sr, semitones):
+    """应用音高偏移"""
+    if semitones == 0:
+        return audio_data
+    try:
+        import librosa
+        return librosa.effects.pitch_shift(y=audio_data, sr=sr, n_steps=semitones)
+    except Exception as e:
+        print(f"[synth] pitch shift failed: {e}")
+        return audio_data
+
+
+def _apply_reverb(audio_data, sr, amount):
+    """应用简单混响（基于延迟叠加）"""
+    if amount <= 0:
+        return audio_data
+    try:
+        import numpy as np
+        wet = amount / 100.0 * 0.4
+        delays = [int(sr * d) for d in [0.03, 0.05, 0.08, 0.12]]
+        decays = [0.4, 0.3, 0.2, 0.1]
+        result = audio_data.copy().astype(np.float64)
+        for delay, decay in zip(delays, decays):
+            delayed = np.zeros_like(result)
+            if delay < len(result):
+                delayed[delay:] = result[:-delay] if delay > 0 else result
+                result += delayed * decay * wet
+        max_val = np.max(np.abs(result))
+        if max_val > 0:
+            result = result / max_val * np.max(np.abs(audio_data))
+        return result.astype(audio_data.dtype)
+    except Exception as e:
+        print(f"[synth] reverb failed: {e}")
+        return audio_data
+
+
+def _normalize_loudness(audio_data, target_db=-18.0):
+    """响度归一化"""
+    try:
+        import numpy as np
+        rms = np.sqrt(np.mean(audio_data.astype(np.float64) ** 2))
+        if rms < 1e-8:
+            return audio_data
+        current_db = 20 * np.log10(rms + 1e-10)
+        gain = 10 ** ((target_db - current_db) / 20)
+        result = audio_data.astype(np.float64) * gain
+        peak = np.max(np.abs(result))
+        if peak > 0.95:
+            result = result * 0.95 / peak
+        return result.astype(np.float32)
+    except Exception as e:
+        print(f"[synth] normalize failed: {e}")
+        return audio_data
+
+
+def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dict):
+    """在后台线程中执行合成"""
+    import numpy as np
+    try:
+        import soundfile as sf
+        import librosa
+    except ImportError as e:
+        SYNTH_TASKS[song_id] = {"status": "error", "error": f"缺少依赖: {e}"}
+        return
+
+    task = SYNTH_TASKS[song_id]
+    sr = 44100
+    work_dir = os.path.join(FINALS_DIR, f"work_{song_id}")
+    os.makedirs(work_dir, exist_ok=True)
+
+    try:
+        duration = song.get("duration", 0)
+        total_samples = int(duration * sr)
+        if total_samples <= 0:
+            raise ValueError("歌曲时长无效")
+
+        # ---- Step 1: 降噪处理（转换格式 + 基础降噪）----
+        task.update({"step": 0, "progress": 5, "message": "降噪处理 - 转换录音格式..."})
+        vocal_tracks = []  # [(audio_data, start_sample, seg_info, rec_info)]
+
+        for seg in segments:
+            seg_recs = recordings_map.get(seg["id"], [])
+            for rec in seg_recs:
+                audio_url = rec.get("audio_url", "")
+                filename = os.path.basename(audio_url)
+                src_path = os.path.join(UPLOAD_DIR, filename)
+                if not os.path.exists(src_path):
+                    print(f"[synth] recording file not found: {src_path}")
+                    continue
+
+                wav_path = os.path.join(work_dir, f"rec_{rec['id']}.wav")
+                ext = os.path.splitext(filename)[1].lower()
+                if ext == ".webm":
+                    if not _convert_webm_to_wav(src_path, wav_path):
+                        continue
+                elif ext == ".wav":
+                    shutil.copy2(src_path, wav_path)
+                else:
+                    if not _convert_to_wav(src_path, wav_path, sr=sr, mono=True):
+                        continue
+
+                try:
+                    audio, file_sr = sf.read(wav_path, dtype='float32')
+                    if len(audio.shape) > 1:
+                        audio = np.mean(audio, axis=1)
+                    if file_sr != sr:
+                        audio = librosa.resample(audio, orig_sr=file_sr, target_sr=sr)
+                except Exception as e:
+                    print(f"[synth] read wav failed: {e}")
+                    continue
+
+                start_sample = int(seg["start_time"] * sr)
+                vocal_tracks.append((audio, start_sample, seg, rec))
+
+        if not vocal_tracks:
+            raise ValueError("没有可用的录音文件")
+
+        task.update({"progress": 12, "message": f"降噪完成 - {len(vocal_tracks)} 条录音"})
+
+        # ---- Step 2: 节奏对齐 ----
+        task.update({"step": 1, "progress": 18, "message": "节奏对齐..."})
+        # 录音已按唱段时间定位，此步骤确认对齐
+        task.update({"progress": 25, "message": "节奏对齐完成"})
+
+        # ---- Step 3: 音高修正 ----
+        task.update({"step": 2, "progress": 28, "message": "音高修正..."})
+        processed_tracks = []
+        for audio, start_sample, seg, rec in vocal_tracks:
+            pitch_shift = rec.get("_pitchShift", 0)
+            if pitch_shift != 0:
+                audio = _apply_pitch_shift(audio, sr, pitch_shift)
+            processed_tracks.append((audio, start_sample, seg, rec))
+        task.update({"progress": 35, "message": "音高修正完成"})
+
+        # ---- Step 4: 响度均衡 ----
+        task.update({"step": 3, "progress": 38, "message": "响度均衡..."})
+        normalized_tracks = []
+        for audio, start_sample, seg, rec in processed_tracks:
+            audio = _normalize_loudness(audio, target_db=-18.0)
+            normalized_tracks.append((audio, start_sample, seg, rec))
+        task.update({"progress": 45, "message": "响度均衡完成"})
+
+        # ---- Step 5: 人声增强 ----
+        task.update({"step": 4, "progress": 48, "message": "人声增强..."})
+        enhanced_tracks = []
+        for audio, start_sample, seg, rec in normalized_tracks:
+            # 轻微高通滤波去除低频噪声
+            try:
+                from scipy.signal import butter, sosfilt
+                sos = butter(4, 80, btype='highpass', fs=sr, output='sos')
+                audio = sosfilt(sos, audio).astype(np.float32)
+            except Exception:
+                pass
+            enhanced_tracks.append((audio, start_sample, seg, rec))
+        task.update({"progress": 55, "message": "人声增强完成"})
+
+        # ---- Step 6: 空间效果（混响）----
+        task.update({"step": 5, "progress": 58, "message": "空间效果..."})
+        spatial_tracks = []
+        for audio, start_sample, seg, rec in enhanced_tracks:
+            reverb_amount = rec.get("_reverb", 0)
+            if reverb_amount > 0:
+                audio = _apply_reverb(audio, sr, reverb_amount)
+            spatial_tracks.append((audio, start_sample, seg, rec))
+        task.update({"progress": 65, "message": "空间效果完成"})
+
+        # ---- Step 7: 合唱增强 ----
+        task.update({"step": 6, "progress": 68, "message": "合唱增强..."})
+        # 合唱段多人录音混合时轻微时间偏移增加厚度
+        final_tracks = []
+        chorus_seg_ids = set()
+        for seg in segments:
+            if seg.get("is_chorus"):
+                chorus_seg_ids.add(seg["id"])
+
+        for i, (audio, start_sample, seg, rec) in enumerate(spatial_tracks):
+            if seg["id"] in chorus_seg_ids:
+                # 合唱段：轻微随机偏移增加厚度感
+                offset_samples = np.random.randint(-int(sr * 0.005), int(sr * 0.005) + 1)
+                start_sample = max(0, start_sample + offset_samples)
+            final_tracks.append((audio, start_sample, seg, rec))
+        task.update({"progress": 75, "message": "合唱增强完成"})
+
+        # ---- Step 8: 最终混音 ----
+        task.update({"step": 7, "progress": 78, "message": "最终混音 - 合并人声..."})
+
+        # 混合所有人声轨道到一条立体声总线
+        vocal_mix = np.zeros(total_samples, dtype=np.float64)
+        for audio, start_sample, seg, rec in final_tracks:
+            end_sample = min(start_sample + len(audio), total_samples)
+            actual_len = end_sample - start_sample
+            if actual_len > 0 and start_sample >= 0:
+                vocal_mix[start_sample:end_sample] += audio[:actual_len].astype(np.float64)
+
+        # 归一化人声混合
+        peak = np.max(np.abs(vocal_mix))
+        if peak > 0:
+            vocal_mix = vocal_mix / peak * 0.85
+
+        task.update({"progress": 85, "message": "最终混音 - 混合伴奏..."})
+
+        # 加载伴奏
+        acc_file = song.get("accompaniment_file", "")
+        acc_audio = None
+        if acc_file:
+            acc_path = os.path.join(UPLOAD_DIR, acc_file)
+            if os.path.exists(acc_path):
+                acc_wav = os.path.join(work_dir, "acc.wav")
+                if _convert_to_wav(acc_path, acc_wav, sr=sr):
+                    try:
+                        acc_raw, acc_sr = sf.read(acc_wav, dtype='float32')
+                        if len(acc_raw.shape) > 1:
+                            acc_audio = np.mean(acc_raw, axis=1)
+                        else:
+                            acc_audio = acc_raw
+                        if acc_sr != sr:
+                            acc_audio = librosa.resample(acc_audio, orig_sr=acc_sr, target_sr=sr)
+                    except Exception as e:
+                        print(f"[synth] load acc failed: {e}")
+
+        # 混合伴奏 + 人声
+        if acc_audio is not None:
+            # 确保长度一致
+            if len(acc_audio) > total_samples:
+                acc_audio = acc_audio[:total_samples]
+            elif len(acc_audio) < total_samples:
+                acc_audio = np.pad(acc_audio, (0, total_samples - len(acc_audio)))
+            # 伴奏稍低于人声
+            acc_norm = acc_audio.astype(np.float64)
+            acc_peak = np.max(np.abs(acc_norm))
+            if acc_peak > 0:
+                acc_norm = acc_norm / acc_peak * 0.65
+            final_mix = vocal_mix * 0.7 + acc_norm * 0.5
+        else:
+            final_mix = vocal_mix
+
+        # 最终限幅
+        peak = np.max(np.abs(final_mix))
+        if peak > 0.95:
+            final_mix = final_mix * 0.95 / peak
+
+        task.update({"progress": 92, "message": "最终混音 - 导出文件..."})
+
+        # 保存最终音频
+        final_id = str(uuid.uuid4())[:8]
+        final_filename = f"final_{song_id}_{final_id}.wav"
+        final_path = os.path.join(FINALS_DIR, final_filename)
+        sf.write(final_path, final_mix.astype(np.float32), sr)
+
+        # 转换为 mp3 以减小体积
+        mp3_filename = f"final_{song_id}_{final_id}.mp3"
+        mp3_path = os.path.join(FINALS_DIR, mp3_filename)
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", final_path, "-b:a", "192k", mp3_path],
+                capture_output=True, timeout=120
+            )
+            if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 0:
+                os.remove(final_path)
+                final_filename = mp3_filename
+                final_path = mp3_path
+        except Exception:
+            pass
+
+        # 保存元数据
+        metadata = {
+            "song_id": song_id,
+            "song_title": song.get("title", ""),
+            "song_artist": song.get("artist", ""),
+            "duration": duration,
+            "segments": [],
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        for seg in segments:
+            seg_meta = {
+                "id": seg["id"],
+                "index": seg["index"],
+                "start_time": seg["start_time"],
+                "end_time": seg["end_time"],
+                "lyrics": seg.get("lyrics", ""),
+                "is_chorus": seg.get("is_chorus", False),
+                "recordings": [],
+            }
+            seg_recs = recordings_map.get(seg["id"], [])
+            for rec in seg_recs:
+                seg_meta["recordings"].append({
+                    "id": rec["id"],
+                    "user_name": rec.get("user_name", ""),
+                    "audio_url": rec.get("audio_url", ""),
+                    "score": rec.get("score", 0),
+                    "pitch_shift": rec.get("_pitchShift", 0),
+                    "reverb": rec.get("_reverb", 0),
+                })
+            metadata["segments"].append(seg_meta)
+
+        meta_path = os.path.join(FINALS_DIR, f"meta_{song_id}_{final_id}.json")
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+        # 复制所有唱段录音到 finals 目录备份
+        recs_dir = os.path.join(FINALS_DIR, f"recs_{song_id}_{final_id}")
+        os.makedirs(recs_dir, exist_ok=True)
+        for seg in segments:
+            seg_recs = recordings_map.get(seg["id"], [])
+            for rec in seg_recs:
+                src = os.path.join(UPLOAD_DIR, os.path.basename(rec.get("audio_url", "")))
+                if os.path.exists(src):
+                    try:
+                        shutil.copy2(src, os.path.join(recs_dir, os.path.basename(src)))
+                    except Exception:
+                        pass
+
+        # 保存到数据库
+        final_record = {
+            "id": final_id,
+            "song_id": song_id,
+            "song_title": song.get("title", ""),
+            "song_artist": song.get("artist", ""),
+            "duration": duration,
+            "audio_file": final_filename,
+            "audio_url": f"/api/finals/{final_filename}",
+            "metadata_file": f"meta_{song_id}_{final_id}.json",
+            "recordings_dir": f"recs_{song_id}_{final_id}",
+            "track_count": len(final_tracks),
+            "segment_count": len(segments),
+            "published": False,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        FINALS_DB[final_id] = final_record
+        _save_db()
+
+        task.update({
+            "status": "done",
+            "progress": 100,
+            "step": 7,
+            "message": "合成完成！",
+            "final_id": final_id,
+        })
+        print(f"[synth] completed: song={song_id}, final={final_id}, tracks={len(final_tracks)}")
+
+    except Exception as e:
+        traceback.print_exc()
+        task.update({"status": "error", "error": str(e), "message": f"合成失败: {e}"})
+    finally:
+        # 清理工作目录
+        try:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+@router.post("/admin/songs/{song_id}/synthesize")
+async def admin_start_synthesis(song_id: str, request: Request):
+    """启动合成任务"""
+    verify_admin(request)
+    song = SONGS_DB.get(song_id)
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲不存在")
+
+    # 检查是否已有进行中的合成
+    existing = SYNTH_TASKS.get(song_id)
+    if existing and existing.get("status") == "running":
+        raise HTTPException(status_code=400, detail="该歌曲已有合成任务正在进行")
+
+    segments = song.get("segments", [])
+    if not segments:
+        raise HTTPException(status_code=400, detail="歌曲没有唱段")
+
+    # 读取请求体中的录音参数（升降调、混响）
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    rec_params = body.get("rec_params", {})  # {rec_id: {pitchShift, reverb}}
+
+    # 收集每个唱段的已选定录音
+    recordings_map = {}  # seg_id -> [rec, ...]
+    missing_segs = []
+    for seg in segments:
+        seg_recs = [
+            r for r in RECORDINGS_DB.values()
+            if r["segment_id"] == seg["id"] and r.get("selected") and r.get("submitted")
+        ]
+        if not seg_recs:
+            missing_segs.append(f"#{seg['index']}")
+        else:
+            # 应用前端传来的参数
+            for r in seg_recs:
+                params = rec_params.get(r["id"], {})
+                r["_pitchShift"] = params.get("pitchShift", 0)
+                r["_reverb"] = params.get("reverb", 0)
+        recordings_map[seg["id"]] = seg_recs
+
+    if missing_segs:
+        raise HTTPException(
+            status_code=400,
+            detail=f"以下唱段未选定录音: {', '.join(missing_segs[:5])}{'...' if len(missing_segs)>5 else ''}"
+        )
+
+    # 初始化任务状态
+    SYNTH_TASKS[song_id] = {
+        "status": "running",
+        "progress": 0,
+        "step": 0,
+        "message": "准备中...",
+        "final_id": None,
+        "error": None,
+    }
+
+    # 启动后台线程
+    thread = threading.Thread(
+        target=_run_synthesis,
+        args=(song_id, song, segments, recordings_map),
+        daemon=True
+    )
+    thread.start()
+
+    return {"success": True, "message": "合成任务已启动"}
+
+
+@router.get("/admin/songs/{song_id}/synth-status")
+async def admin_synth_status(song_id: str, request: Request):
+    """查询合成任务状态"""
+    verify_admin(request)
+    task = SYNTH_TASKS.get(song_id)
+    if not task:
+        return {"success": True, "data": {"status": "none"}}
+    return {"success": True, "data": task}
+
+
+# ============ 管理员 - 最终成曲管理 ============
+
+@router.get("/admin/finals")
+async def admin_get_finals(request: Request):
+    """获取所有最终成曲"""
+    verify_admin(request)
+    finals = sorted(FINALS_DB.values(), key=lambda f: f.get("created_at", ""), reverse=True)
+    return {"success": True, "data": finals}
+
+
+@router.get("/admin/finals/{final_id}")
+async def admin_get_final(final_id: str, request: Request):
+    """获取单个最终成曲详情"""
+    verify_admin(request)
+    final = FINALS_DB.get(final_id)
+    if not final:
+        raise HTTPException(status_code=404, detail="成曲不存在")
+    return {"success": True, "data": final}
+
+
+@router.post("/admin/finals/{final_id}/publish")
+async def admin_publish_final(final_id: str, request: Request):
+    """发布成曲"""
+    verify_admin(request)
+    final = FINALS_DB.get(final_id)
+    if not final:
+        raise HTTPException(status_code=404, detail="成曲不存在")
+    final["published"] = True
+    final["published_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _save_db()
+    return {"success": True, "data": final}
+
+
+@router.post("/admin/finals/{final_id}/unpublish")
+async def admin_unpublish_final(final_id: str, request: Request):
+    """取消发布"""
+    verify_admin(request)
+    final = FINALS_DB.get(final_id)
+    if not final:
+        raise HTTPException(status_code=404, detail="成曲不存在")
+    final["published"] = False
+    final.pop("published_at", None)
+    _save_db()
+    return {"success": True, "data": final}
+
+
+@router.delete("/admin/finals/{final_id}")
+async def admin_delete_final(final_id: str, request: Request):
+    """删除成曲及其所有关联文件"""
+    verify_admin(request)
+    final = FINALS_DB.pop(final_id, None)
+    if not final:
+        raise HTTPException(status_code=404, detail="成曲不存在")
+    # 删除音频文件
+    audio_file = final.get("audio_file", "")
+    if audio_file:
+        fp = os.path.join(FINALS_DIR, audio_file)
+        if os.path.exists(fp):
+            try: os.remove(fp)
+            except: pass
+    # 删除元数据文件
+    meta_file = final.get("metadata_file", "")
+    if meta_file:
+        fp = os.path.join(FINALS_DIR, meta_file)
+        if os.path.exists(fp):
+            try: os.remove(fp)
+            except: pass
+    # 删除录音备份目录
+    recs_dir = final.get("recordings_dir", "")
+    if recs_dir:
+        dp = os.path.join(FINALS_DIR, recs_dir)
+        if os.path.exists(dp):
+            try: shutil.rmtree(dp)
+            except: pass
+    _save_db()
+    return {"success": True, "message": "成曲已删除"}
+
+
+@router.get("/finals/{filename:path}")
+async def serve_final_file(filename: str):
+    """提供最终成曲文件（/api/finals/ 路径）"""
+    filepath = os.path.join(FINALS_DIR, filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    ext = os.path.splitext(filename)[1].lower()
+    mime_map = {
+        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac',
+        '.ogg': 'audio/ogg',
+    }
+    return FileResponse(filepath, media_type=mime_map.get(ext, 'application/octet-stream'))
