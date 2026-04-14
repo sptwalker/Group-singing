@@ -240,14 +240,6 @@
     // ===== 整曲播放控制 =====
     let isFullPlaying = false;
 
-    // 初始化 WaveSurfer 可视化
-    function initVisualizer() {
-        if (_visualizerWS) return;
-        const container = document.getElementById('waveVisualizer');
-        if (!container || typeof WaveSurfer === 'undefined') return;
-        // 暂不加载音频，等播放时再加载
-    }
-
     function ensureVisualizer(audioUrl) {
         const container = document.getElementById('waveVisualizer');
         if (!container || typeof WaveSurfer === 'undefined') return;
@@ -405,6 +397,21 @@
 
     // ===== 录音列表 =====
     let recordings = [];
+    let _playingIdx = -1;
+
+    function stopRecordingPlayback(resetButton = true) {
+        if (_playingIdx < 0) return;
+        const prevWs = _taskRecWsList[_playingIdx];
+        if (prevWs && prevWs.isPlaying()) prevWs.stop();
+        if (resetButton) {
+            const prevBtn = recordingList.querySelector(`.btn-play-mini[data-rec-idx="${_playingIdx}"]`);
+            if (prevBtn) {
+                prevBtn.textContent = '▶';
+                prevBtn.classList.remove('playing');
+            }
+        }
+        _playingIdx = -1;
+    }
 
     async function loadRecordings() {
         try {
@@ -443,6 +450,7 @@
     }
 
     function renderRecordings() {
+        stopRecordingPlayback();
         _destroyTaskRecWS();
         let list = [...recordings];
         if (sortMode === 'order') {
@@ -485,7 +493,6 @@
         });
         recordingList.innerHTML = html;
 
-        // 初始化 WaveSurfer
         list.forEach((rec, i) => {
             const el = document.getElementById(`taskRecW${i}`);
             if (!el || typeof WaveSurfer === 'undefined') return;
@@ -502,32 +509,23 @@
                 normalize: true,
                 interact: false,
                 hideScrollbar: true,
-                url: audioUrl,
             });
+            ws.load(audioUrl);
             _taskRecWsList[i] = ws;
         });
 
-        // 绑定播放
-        let _playingIdx = -1;
         recordingList.querySelectorAll('.btn-play-mini').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const idx = parseInt(btn.dataset.recIdx);
                 const ws = _taskRecWsList[idx];
 
-                // 停止之前的
-                if (_playingIdx >= 0 && _taskRecWsList[_playingIdx]) {
-                    const prevWs = _taskRecWsList[_playingIdx];
-                    if (prevWs.isPlaying()) prevWs.stop();
-                    const prevBtn = recordingList.querySelector(`.btn-play-mini[data-rec-idx="${_playingIdx}"]`);
-                    if (prevBtn) { prevBtn.textContent = '▶'; prevBtn.classList.remove('playing'); }
-                }
+                stopRecordingPlayback();
                 AudioManager.stop();
                 resetPlayButtons();
                 isFullPlaying = false;
 
                 if (_playingIdx === idx) {
-                    _playingIdx = -1;
                     return;
                 }
 
@@ -545,7 +543,6 @@
             });
         });
 
-        // 绑定点赞
         recordingList.querySelectorAll('.rec-like').forEach(el => {
             el.addEventListener('click', async () => {
                 const recId = el.dataset.id;
@@ -561,7 +558,6 @@
             });
         });
 
-        // 滚动到聚焦段（置顶）
         if (focusSegId) {
             setTimeout(() => {
                 const sep = recordingList.querySelector(`.rec-seg-separator[data-sep-seg-id="${focusSegId}"]`);

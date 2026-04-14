@@ -1,13 +1,11 @@
 // ===== 分段编辑器模块 - Part1: 状态/渲染/波形 =====
-console.log('[admin] admin-editor.js loaded');
 let editorWS = null, editorSong = null, editorSegments = [], editorActiveIdx = -1;
 let editorAudio = null, _editorAudioRAF = 0;
 let editorDirty = false, editorHistory = [], editorHistoryIdx = -1;
 const HIST_MAX = 20, SEG_MIN_DUR = 0.5;
 let _loopPlay = false, _playingSegOnly = false;
-let _editorEventsBound = false, _editorHighlightedIdx = -1, _editorPlayingIdx = -1;
+let _editorEventsBound = false, _editorPlayingIdx = -1;
 let _editorOverlayVersion = '';
-let _editorPlayingBlock = null;
 let _editorWaveMetrics = { width: 0, height: 220 };
 let _editorPxPerSec = 0;
 let _editorSegListVersion = '';
@@ -123,7 +121,6 @@ async function renderEditor(container) {
 }
 
 window.renderEditor = renderEditor;
-console.log('[admin] renderEditor assigned to window:', typeof window.renderEditor);
 
 function _stopEditorAudio(resetPlaybar = false) {
     if(_editorAudioRAF) {
@@ -198,14 +195,12 @@ function _ensureEditorAudio() {
     editorAudio.crossOrigin = 'anonymous';
     editorAudio.preload = 'auto';
     editorAudio.addEventListener('play', () => {
-        console.log('[editor-audio] play', { url, currentTime: editorAudio?.currentTime, paused: editorAudio?.paused });
         _editorIsPlaying = true;
         _setAutoFollowEnabled(true);
         _refreshPlayingState();
         if(!_editorAudioRAF) _tickEditorAudio();
     });
     editorAudio.addEventListener('pause', () => {
-        console.log('[editor-audio] pause', { url, currentTime: editorAudio?.currentTime, ended: editorAudio?.ended, readyState: editorAudio?.readyState });
         if(_editorAudioRAF) {
             cancelAnimationFrame(_editorAudioRAF);
             _editorAudioRAF = 0;
@@ -217,7 +212,6 @@ function _ensureEditorAudio() {
     });
 
     editorAudio.addEventListener('ended', () => {
-        console.log('[editor-audio] ended', { url, duration: editorAudio?.duration });
         if(_editorAudioRAF) {
             cancelAnimationFrame(_editorAudioRAF);
             _editorAudioRAF = 0;
@@ -229,12 +223,8 @@ function _ensureEditorAudio() {
         _refreshPlayingState();
         _updatePlaybar(editorAudio?.duration || 0);
     });
-    editorAudio.addEventListener('loadedmetadata', () => {
-        console.log('[editor-audio] loadedmetadata', { url, duration: editorAudio?.duration, readyState: editorAudio?.readyState });
-    });
-    editorAudio.addEventListener('canplay', () => {
-        console.log('[editor-audio] canplay', { url, currentTime: editorAudio?.currentTime, readyState: editorAudio?.readyState });
-    });
+    editorAudio.addEventListener('loadedmetadata', () => {});
+    editorAudio.addEventListener('canplay', () => {});
     // 备用边界检查：timeupdate 事件作为 RAF 的补充
     editorAudio.addEventListener('timeupdate', () => {
         if(!editorAudio || !_playingSegOnly || editorActiveIdx < 0) return;
@@ -395,7 +385,6 @@ function _playEditorAudioFrom(time, { segmentIdx = -1, resume = false } = {}) {
     const playPromise = audio.play();
     if(playPromise && typeof playPromise.then === 'function') {
         playPromise.then(() => {
-            console.log('[editor-audio] play() resolved', { currentTime: audio.currentTime, paused: audio.paused, segmentIdx, resume });
             _refreshPlayingState();
         }).catch(err => {
             console.error('[editor-audio] play() rejected', { err, url: audio.src, segmentIdx, resume });
@@ -726,20 +715,32 @@ function _syncWaveMetrics() {
     const canvas = wrap.querySelector('canvas');
     const svg = wrap.querySelector('svg');
     const width = _getWaveRenderWidth();
-    const height = Math.max(wrap.offsetHeight, wsScrollable?.getBoundingClientRect?.().height || 0, waveEl?.getBoundingClientRect?.().height || 0, canvas?.getBoundingClientRect?.().height || 0, svg?.getBoundingClientRect?.().height || 0, 220);
+    const waveHeight = Math.max(wrap.offsetHeight, wsScrollable?.getBoundingClientRect?.().height || 0, waveEl?.getBoundingClientRect?.().height || 0, canvas?.getBoundingClientRect?.().height || 0, svg?.getBoundingClientRect?.().height || 0, 220);
+    const timelineTop = waveHeight + 12;
+    const hostHeight = timelineTop + 34;
     const viewportWidth = Math.max(waveArea?.clientWidth || 0, 1);
-    const widthChanged = width !== _editorWaveMetrics.width || height !== _editorWaveMetrics.height;
-    _editorWaveMetrics = { width, height };
+    const widthChanged = width !== _editorWaveMetrics.width || waveHeight !== _editorWaveMetrics.height;
+    _editorWaveMetrics = { width, height: waveHeight };
     host.style.width = `${width}px`;
     host.style.minWidth = `${viewportWidth}px`;
-    host.style.height = `${height}px`;
+    host.style.height = `${hostHeight}px`;
     wrap.style.width = `${width}px`;
     wrap.style.minWidth = `${width}px`;
+    wrap.style.height = `${waveHeight}px`;
+    wrap.style.minHeight = `${waveHeight}px`;
     ov.style.width = `${width}px`;
-    ov.style.height = `${height}px`;
-    if(timeline) timeline.style.width = `${width}px`;
+    ov.style.height = `${waveHeight}px`;
+    ov.style.top = '0px';
+    if(timeline) {
+        timeline.style.width = `${width}px`;
+        timeline.style.top = `${timelineTop}px`;
+    }
     if(_editorCursorLine) {
-        _editorCursorLine.style.height = `${height}px`;
+        _editorCursorLine.style.height = `${waveHeight}px`;
+        _editorCursorLine.style.top = '0px';
+    }
+    if(_editorCursorHandle) {
+        _editorCursorHandle.style.top = '-22px';
     }
     if(widthChanged) _renderTimelineTicks();
 }
@@ -914,8 +915,6 @@ function _bindEditorEvents() {
             if(t <= seg.start_time + SEG_MIN_DUR || t >= next.end_time - SEG_MIN_DUR) {
                 showToast('进度线位置不适合调整切分','error'); return;
             }
-            // 如果两段之前是贴合的，同时移动（issue 6）
-            const wasAdjacent = Math.abs(seg.end_time - next.start_time) < 0.05;
             seg.end_time = t;
             next.start_time = t;
             _commitChange();
@@ -1006,9 +1005,7 @@ async function _loadSong(songId) {
         editorSong = res.data;
         editorSegments = JSON.parse(JSON.stringify(editorSong.segments||[]));
         editorActiveIdx = -1;
-        _editorHighlightedIdx = -1;
         _editorPlayingIdx = -1;
-        _editorPlayingBlock = null;
         _editorAutoFitApplied = false;
         _editorPausedSegIdx = -1;
         _editorPauseOriginSegIdx = -1;
@@ -1047,8 +1044,6 @@ function _initWS() {
     _ensureWaveOverlayHost();
     if(_editorCursorLine) _editorCursorLine.style.display = 'none';
     const url = _buildEditorMediaUrl(editorSong.audio_url);
-
-    console.log('[admin] init waveform url:', url);
 
     if(typeof WaveSurfer === 'undefined' || !WaveSurfer?.create) {
         wrap.innerHTML = '<div class="editor-empty" style="height:220px;"><p>波形组件加载失败，请刷新页面重试</p></div>';
@@ -1151,7 +1146,6 @@ function _syncDetailWithCursor(cur) {
     const foundIdx = editorSegments.findIndex(s => cur >= s.start_time && cur < s.end_time);
     if(foundIdx >= 0 && foundIdx !== editorActiveIdx) {
         editorActiveIdx = foundIdx;
-        _editorHighlightedIdx = foundIdx;
         _updateSegListActiveState();
         _renderOverlay();
     }
@@ -1304,7 +1298,6 @@ function _selectSeg(idx, seek = true) {
         return;
     }
     editorActiveIdx = idx;
-    _editorHighlightedIdx = idx;
     _updateSegListActiveState();
     _renderOverlay();
     _syncToolbarSegButtons();
@@ -1317,11 +1310,6 @@ function _selectSeg(idx, seek = true) {
 
 
 function _syncToolbarSegButtons() {
-    const hasActive = editorActiveIdx >= 0 && editorActiveIdx < editorSegments.length;
-    const btnEdit = document.getElementById('btnEditSeg');
-    const btnDel = document.getElementById('btnDelSeg');
-    if(btnEdit) btnEdit.disabled = !hasActive;
-    if(btnDel) btnDel.disabled = !hasActive;
     _renderSegDetail();
 }
 
@@ -1379,10 +1367,6 @@ function _renderSegDetail() {
 
     const btnMerge = document.getElementById('sdBtnMerge');
     if(btnMerge) btnMerge.disabled = !hasNext;
-}
-
-function _highlightAtTime() {
-    return;
 }
 
 function _playSeg(idx) {

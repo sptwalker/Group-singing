@@ -28,7 +28,21 @@ async function renderDashboard(container) {
 async function renderSongs(container) {
     try {
         const res = await aGet('/admin/songs');
-        const songs = res.data;
+        let songs = res.data;
+
+        // 标准化字段：audio_file_exists 未返回时默认为 true
+        songs.forEach(s => {
+            if (s.audio_file_exists === undefined) s.audio_file_exists = true;
+            if (s.has_accompaniment === undefined) s.has_accompaniment = !!s.accompaniment_url;
+        });
+
+        // 检查歌曲文件是否存在，不存在则在卡片上标记警告
+        const missing = songs.filter(s => s.audio_file_exists === false);
+        if (missing.length > 0) {
+            const names = missing.map(s => s.title).join('、');
+            showToast(`以下歌曲的音频文件已丢失：${names}，请重新上传或删除`, 'warning');
+        }
+
         container.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
             <span style="color:var(--text-secondary);font-size:13px;">共 ${songs.length} 首歌曲</span>
@@ -42,7 +56,8 @@ async function renderSongs(container) {
             <button class="btn btn-primary" onclick="showUploadSongDialog()">+ 上传新歌曲</button>
         </div>` : `
         <div class="song-grid">${songs.map(s => `
-            <div class="song-card" data-id="${s.id}">
+            <div class="song-card${s.audio_file_exists === false ? ' song-card-missing' : ''}" data-id="${s.id}">
+                ${s.audio_file_exists === false ? '<div class="song-card-warning">⚠️ 音频文件丢失</div>' : ''}
                 <div class="song-card-header">
                     <div class="song-card-icon">🎵</div>
                     <div class="song-card-info">
@@ -56,6 +71,12 @@ async function renderSongs(container) {
                     <span>🎤 ${s.recording_count||0} 录音</span>
                 </div>
                 <div class="song-card-progress"><div class="bar" style="width:${s.completion||0}%"></div></div>
+                <div class="song-card-acc">
+                    ${s.has_accompaniment
+                        ? `<span class="acc-badge">✅ 有伴奏</span>`
+                        : `<button class="btn btn-outline btn-sm acc-upload-btn" onclick="uploadAccForSong('${s.id}','${s.title.replace(/'/g,"\\'")}')">🎹 上传伴奏</button>`
+                    }
+                </div>
                 <div class="song-card-actions">
                     <button class="btn btn-outline btn-sm" onclick="editSongInfo('${s.id}')">编辑信息</button>
                     <button class="btn btn-primary btn-sm" onclick="openEditorForSong('${s.id}')">分段编辑</button>
@@ -248,6 +269,103 @@ async function confirmDeleteSong(songId) {
         closeModal(); showToast('已删除', 'success');
         renderSongs(document.getElementById('moduleContainer'));
     } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ===== 上传伴奏 =====
+function uploadAccForSong(songId, songTitle) {
+    showModal('上传伴奏 - ' + songTitle, `
+        <div class="field" style="margin-bottom:16px;">
+            <label style="display:block;font-weight:600;margin-bottom:6px;">伴奏音频文件 <span style="color:#ef4444;">*</span></label>
+            <div id="accDropZone" style="border:2px dashed var(--border);border-radius:8px;padding:32px 20px;text-align:center;cursor:pointer;transition:all .2s;background:var(--bg-secondary);">
+                <div style="font-size:32px;margin-bottom:8px;">🎹</div>
+                <p style="color:var(--text-secondary);margin-bottom:8px;">点击选择或拖拽伴奏文件到此处</p>
+                <p style="font-size:12px;color:var(--text-light);">支持 MP3、WAV、FLAC、OGG、M4A 格式，时长需与原曲基本一致</p>
+                <input type="file" id="accAudioFile" accept=".mp3,.wav,.flac,.ogg,.m4a,.aac,.wma" style="display:none;">
+            </div>
+            <div id="accFileInfo" style="display:none;margin-top:8px;padding:10px 14px;background:var(--bg-secondary);border-radius:6px;font-size:13px;">
+                <span id="accFileName" style="color:var(--text-primary);font-weight:500;"></span>
+                <span id="accFileSize" style="color:var(--text-secondary);margin-left:8px;"></span>
+                <button onclick="document.getElementById('accAudioFile').value='';document.getElementById('accDropZone').style.display='';document.getElementById('accFileInfo').style.display='none';" style="float:right;background:none;border:none;color:var(--text-light);cursor:pointer;font-size:16px;">×</button>
+            </div>
+        </div>
+        <div id="accUploadProgress" style="display:none;margin-top:12px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <div style="flex:1;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;">
+                    <div id="accProgressBar" style="height:100%;background:var(--primary);width:0%;border-radius:3px;transition:width .3s;"></div>
+                </div>
+                <span id="accProgressText" style="font-size:12px;color:var(--text-secondary);min-width:40px;">0%</span>
+            </div>
+            <p id="accStatusText" style="font-size:12px;color:var(--text-secondary);margin-top:6px;">上传中...</p>
+        </div>
+    `, `<button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" id="btnDoAccUpload" onclick="doUploadAcc('${songId}')">上传伴奏</button>`);
+
+    const dropZone = document.getElementById('accDropZone');
+    const fileInput = document.getElementById('accAudioFile');
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--primary)'; dropZone.style.background = 'rgba(79,70,229,0.05)'; });
+    dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = 'var(--border)'; dropZone.style.background = 'var(--bg-secondary)'; });
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = 'var(--border)'; dropZone.style.background = 'var(--bg-secondary)';
+        if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; _showAccFileInfo(); }
+    });
+    fileInput.addEventListener('change', _showAccFileInfo);
+}
+
+function _showAccFileInfo() {
+    const file = document.getElementById('accAudioFile').files[0];
+    if (!file) return;
+    document.getElementById('accDropZone').style.display = 'none';
+    document.getElementById('accFileInfo').style.display = 'block';
+    document.getElementById('accFileName').textContent = file.name;
+    document.getElementById('accFileSize').textContent = (file.size / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+async function doUploadAcc(songId) {
+    const file = document.getElementById('accAudioFile').files[0];
+    if (!file) { showToast('请选择伴奏文件', 'error'); return; }
+    if (file.size > 100 * 1024 * 1024) { showToast('文件大小不能超过 100MB', 'error'); return; }
+
+    const btn = document.getElementById('btnDoAccUpload');
+    btn.disabled = true; btn.textContent = '上传中...';
+    document.getElementById('accUploadProgress').style.display = 'block';
+
+    const formData = new FormData();
+    formData.append('audio', file);
+
+    try {
+        const xhr = new XMLHttpRequest();
+        const result = await new Promise((resolve, reject) => {
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const pct = Math.round(e.loaded / e.total * 100);
+                    document.getElementById('accProgressBar').style.width = pct + '%';
+                    document.getElementById('accProgressText').textContent = pct + '%';
+                    document.getElementById('accStatusText').textContent = pct < 100 ? '上传中...' : '正在校验伴奏时长...';
+                }
+            });
+            xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve(JSON.parse(xhr.responseText));
+                } else {
+                    try { reject(new Error(JSON.parse(xhr.responseText).detail)); }
+                    catch { reject(new Error(`上传失败(${xhr.status})`)); }
+                }
+            });
+            xhr.addEventListener('error', () => reject(new Error('网络错误')));
+            xhr.open('POST', `${API}/admin/songs/${songId}/accompaniment`);
+            xhr.setRequestHeader('Authorization', `Bearer ${adminToken}`);
+            xhr.send(formData);
+        });
+
+        closeModal();
+        showToast('伴奏上传成功', 'success');
+        renderSongs(document.getElementById('moduleContainer'));
+    } catch (e) {
+        showToast(e.message, 'error');
+        btn.disabled = false; btn.textContent = '上传伴奏';
+        document.getElementById('accUploadProgress').style.display = 'none';
+    }
 }
 
 // openEditorForSong 已移至 admin-editor2.js

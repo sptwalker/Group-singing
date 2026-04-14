@@ -32,6 +32,8 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 print(f"[DEBUG] MUSIC_DIR = {MUSIC_DIR}")
 print(f"[DEBUG] MUSIC_DIR exists = {os.path.exists(MUSIC_DIR)}")
+print(f"[DEBUG] UPLOAD_DIR = {UPLOAD_DIR}")
+print(f"[DEBUG] UPLOAD_DIR exists = {os.path.exists(UPLOAD_DIR)}")
 print(f"[DEBUG] DATA_DIR = {DATA_DIR}")
 if os.path.exists(MUSIC_DIR):
     print(f"[DEBUG] Music files: {os.listdir(MUSIC_DIR)}")
@@ -509,8 +511,9 @@ async def submit_recording(recording_id: str):
 
 
 @router.post("/segments/{segment_id}/complete")
-async def mark_segment_completed(segment_id: str):
+async def mark_segment_completed(segment_id: str, request: Request):
     """管理员标记唱段为已完成"""
+    verify_admin(request)
     seg = SEGMENTS_DB.get(segment_id)
     if not seg:
         raise HTTPException(status_code=404, detail="唱段不存在")
@@ -526,9 +529,29 @@ async def mark_segment_completed(segment_id: str):
     return {"success": True, "data": seg}
 
 
+@router.post("/segments/{segment_id}/reopen")
+async def reopen_segment(segment_id: str, request: Request):
+    """管理员重新开放已完成唱段"""
+    verify_admin(request)
+    seg = SEGMENTS_DB.get(segment_id)
+    if not seg:
+        raise HTTPException(status_code=404, detail="唱段不存在")
+
+    seg["status"] = "claimed" if seg.get("claim_count", 0) > 0 else "unassigned"
+
+    song = SONGS_DB.get(seg["song_id"])
+    if song:
+        completed = sum(1 for s in song["segments"] if s["status"] == "completed")
+        song["completion"] = round(completed / len(song["segments"]) * 100, 1)
+
+    _save_db()
+    return {"success": True, "data": seg}
+
+
 @router.delete("/recordings/{recording_id}")
-async def delete_recording(recording_id: str):
+async def delete_recording(recording_id: str, request: Request):
     """删除录音"""
+    verify_admin(request)
     rec = RECORDINGS_DB.pop(recording_id, None)
     if not rec:
         raise HTTPException(status_code=404, detail="录音不存在")
@@ -560,6 +583,21 @@ async def like_recording(recording_id: str):
     rec["likes"] += 1
     _save_db()
     return {"success": True, "data": rec}
+
+
+@router.post("/admin/segments/{segment_id}/complete")
+async def admin_mark_segment_completed(segment_id: str, request: Request):
+    return await mark_segment_completed(segment_id, request)
+
+
+@router.post("/admin/segments/{segment_id}/reopen")
+async def admin_reopen_segment(segment_id: str, request: Request):
+    return await reopen_segment(segment_id, request)
+
+
+@router.delete("/admin/recordings/{recording_id}")
+async def admin_delete_recording(recording_id: str, request: Request):
+    return await delete_recording(recording_id, request)
 
 
 # ============ 音频文件服务 ============
@@ -687,11 +725,29 @@ async def admin_get_songs(request: Request):
     verify_admin(request)
     songs = []
     for s in SONGS_DB.values():
+        # 检查原曲文件是否存在（兼容 /api/uploads/ 和 /api/music/ 两种路径）
+        audio_file = s.get("audio_file", "")
+        audio_url = s.get("audio_url", "")
+        audio_exists = False
+        if audio_file:
+            audio_exists = os.path.exists(os.path.join(UPLOAD_DIR, audio_file))
+        if not audio_exists and audio_url:
+            if "/api/uploads/" in audio_url:
+                fname = audio_url.split("/api/uploads/")[-1]
+                audio_exists = os.path.exists(os.path.join(UPLOAD_DIR, fname))
+            elif "/api/music/" in audio_url:
+                fname = audio_url.split("/api/music/")[-1]
+                audio_exists = os.path.exists(os.path.join(MUSIC_DIR, fname))
+        # 检查伴奏文件是否存在
+        acc_file = s.get("accompaniment_file", "")
+        has_acc = bool(acc_file) and os.path.exists(os.path.join(UPLOAD_DIR, acc_file))
         songs.append({
             **s,
             "claimed_count": sum(1 for seg in s["segments"] if seg["status"] != "unassigned"),
             "completed_count": sum(1 for seg in s["segments"] if seg["status"] == "completed"),
             "recording_count": sum(1 for r in RECORDINGS_DB.values() if r["song_id"] == s["id"]),
+            "audio_file_exists": audio_exists,
+            "has_accompaniment": has_acc,
         })
     return {"success": True, "data": songs}
 
@@ -913,6 +969,9 @@ async def admin_batch_update_segments(song_id: str, request: Request):
         new_id = f"{song_id}-{uuid.uuid4().hex[:6]}"
         while new_id in SEGMENTS_DB:
             new_id = f"{song_id}-{uuid.uuid4().hex[:6]}"
+        seg_status = seg_data.get("status", "unassigned")
+        if seg_status == "claimed":
+            seg_status = "unassigned"
         seg = {
             "id": new_id,
             "song_id": song_id,
@@ -922,7 +981,7 @@ async def admin_batch_update_segments(song_id: str, request: Request):
             "lyrics": seg_data.get("lyrics", ""),
             "difficulty": seg_data.get("difficulty", "normal"),
             "is_chorus": seg_data.get("is_chorus", False),
-            "status": seg_data.get("status", "unassigned"),
+            "status": seg_status,
             "claim_count": 0,
             "submit_count": 0,
             "claims": [],
@@ -950,15 +1009,27 @@ async def admin_get_recordings(request: Request, song_id: Optional[str] = None):
 
 @router.post("/admin/recordings/{recording_id}/select")
 async def admin_select_recording(recording_id: str, request: Request):
-    """选定录音为该唱段的最终版本"""
+    """选定录音为该唱段的最终版本
+    独唱段：互斥，同段仅允许一条选定
+    合唱段：允许多选（最多20条）
+    """
     verify_admin(request)
     rec = RECORDINGS_DB.get(recording_id)
     if not rec:
         raise HTTPException(status_code=404, detail="录音不存在")
-    # 取消同唱段其他录音的选定
-    for r in RECORDINGS_DB.values():
-        if r["segment_id"] == rec["segment_id"]:
-            r["selected"] = False
+    seg = SEGMENTS_DB.get(rec["segment_id"])
+    is_chorus = seg.get("is_chorus", False) if seg else False
+    if is_chorus:
+        # 合唱段：检查已选定数量上限
+        selected_count = sum(1 for r in RECORDINGS_DB.values()
+                            if r["segment_id"] == rec["segment_id"] and r.get("selected"))
+        if selected_count >= 20 and not rec.get("selected"):
+            raise HTTPException(status_code=400, detail="合唱段最多选定20条录音")
+    else:
+        # 独唱段：互斥，取消同唱段其他录音的选定
+        for r in RECORDINGS_DB.values():
+            if r["segment_id"] == rec["segment_id"]:
+                r["selected"] = False
     rec["selected"] = True
     _save_db()
     return {"success": True, "data": rec}
@@ -1015,3 +1086,78 @@ async def admin_list_music_files(request: Request):
                     "url": f"/api/music/{f}",
                 })
     return {"success": True, "data": files}
+
+
+@router.post("/admin/songs/{song_id}/accompaniment")
+async def admin_upload_accompaniment(
+    song_id: str,
+    request: Request,
+    audio: UploadFile = File(...),
+):
+    """上传伴奏文件，校验时长与原曲基本一致（±5秒）"""
+    verify_admin(request)
+    song = SONGS_DB.get(song_id)
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲不存在")
+
+    _, ext = os.path.splitext(audio.filename or "")
+    ext = ext.lower()
+    if ext not in ALLOWED_AUDIO_EXT:
+        raise HTTPException(status_code=400, detail=f"不支持的音频格式: {ext}")
+
+    # 保存临时文件检测时长
+    tmp_filename = f"acc_{song_id}{ext}"
+    tmp_filepath = os.path.join(UPLOAD_DIR, tmp_filename)
+    content = await audio.read()
+    with open(tmp_filepath, "wb") as f:
+        f.write(content)
+
+    acc_duration = _get_audio_duration(tmp_filepath)
+    if acc_duration <= 0:
+        os.remove(tmp_filepath)
+        raise HTTPException(status_code=400, detail="无法读取伴奏时长，请检查文件是否损坏")
+
+    song_duration = song.get("duration", 0)
+    diff = abs(acc_duration - song_duration)
+    tolerance = max(5.0, song_duration * 0.03)  # 容差：5秒或3%
+    if diff > tolerance:
+        os.remove(tmp_filepath)
+        raise HTTPException(
+            status_code=400,
+            detail=f"伴奏时长({acc_duration:.1f}s)与原曲({song_duration:.1f}s)相差{diff:.1f}s，超出容差{tolerance:.1f}s"
+        )
+
+    # 检测通过，保存
+    song["accompaniment_url"] = f"/api/uploads/{tmp_filename}"
+    song["accompaniment_file"] = tmp_filename
+    song["accompaniment_duration"] = acc_duration
+    _save_db()
+
+    print(f"[accompaniment] song={song_id}, acc_duration={acc_duration}s, song_duration={song_duration}s, diff={diff:.1f}s")
+    return {
+        "success": True,
+        "data": {
+            "accompaniment_url": song["accompaniment_url"],
+            "accompaniment_duration": acc_duration,
+            "song_duration": song_duration,
+            "diff": round(diff, 2),
+        }
+    }
+
+
+@router.delete("/admin/songs/{song_id}/accompaniment")
+async def admin_delete_accompaniment(song_id: str, request: Request):
+    """删除伴奏文件"""
+    verify_admin(request)
+    song = SONGS_DB.get(song_id)
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲不存在")
+    acc_file = song.pop("accompaniment_file", None)
+    song.pop("accompaniment_url", None)
+    song.pop("accompaniment_duration", None)
+    if acc_file:
+        fp = os.path.join(UPLOAD_DIR, acc_file)
+        if os.path.exists(fp):
+            os.remove(fp)
+    _save_db()
+    return {"success": True, "message": "伴奏已删除"}

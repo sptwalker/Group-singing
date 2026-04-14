@@ -241,8 +241,6 @@
                     autoGainControl: true,
                 }
             });
-            console.log('[录音] 麦克风已获取, tracks:', _micStream.getAudioTracks().length,
-                'settings:', JSON.stringify(_micStream.getAudioTracks()[0].getSettings()));
         } catch (e) {
             showToast('无法访问麦克风，请授权后重试');
             console.error('[录音] 麦克风获取失败:', e);
@@ -411,8 +409,6 @@
                     mimeType = '';
                 }
             }
-            console.log('[录音] 使用 mimeType:', mimeType || '浏览器默认',
-                        '| 音频处理:', _processedStream ? '降噪+美化' : '原始');
 
             const options = mimeType ? { mimeType } : {};
             mediaRecorder = new MediaRecorder(recStream, options);
@@ -421,7 +417,6 @@
             mediaRecorder.ondataavailable = (e) => {
                 if (e.data && e.data.size > 0) {
                     recordedChunks.push(e.data);
-                    console.log('[录音] 数据块:', e.data.size, 'bytes, 总块数:', recordedChunks.length);
                 }
             };
 
@@ -434,7 +429,6 @@
 
             mediaRecorder.start();
             isRecording = true;
-            console.log('[录音] MediaRecorder已启动, state:', mediaRecorder.state);
 
             // 降低背景音乐音量，但不要太低
             const audio = AudioManager.getCurrent();
@@ -489,10 +483,8 @@
                     setTimeout(() => {
                         if (_recCompleted) { _stopHandled = false; return; }
                         _recCompleted = true;
-                        console.log('[录音] onstop, 共', recordedChunks.length, '个数据块');
                         const mimeType = mediaRecorder.mimeType || 'audio/webm;codecs=opus';
                         const blob = new Blob(recordedChunks, { type: mimeType });
-                        console.log('[录音] Blob大小:', blob.size, 'bytes, type:', blob.type, 'mimeType:', mimeType);
                         if (recordedChunks.length > 0 && blob.size > 0) {
                             onRecordingComplete(blob);
                         } else {
@@ -505,7 +497,6 @@
                 };
             }
             mediaRecorder.stop();
-            console.log('[录音] MediaRecorder已停止');
         } else {
             _stopHandled = false;
             _recCompleted = false;
@@ -517,7 +508,6 @@
         if (_micStream) {
             _micStream.getTracks().forEach(t => t.stop());
             _micStream = null;
-            console.log('[录音] 麦克风已释放');
         }
     }
 
@@ -597,7 +587,6 @@
         _processedStream = destination.stream;
         _procNodes = [source, highpass, lowpass, compressor, midBoost, presenceBoost, makeupGain, destination];
 
-        console.log('[音频处理] 降噪+美化处理链已建立');
         return { analyser: _analyser, processedStream: _processedStream };
     }
 
@@ -1078,7 +1067,6 @@
     }
 
     function onRecordingComplete(blob) {
-        console.log('[录音完成] blob:', blob.size, 'bytes, type:', blob.type);
         const url = URL.createObjectURL(blob);
         const now = new Date();
         const timeStr = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
@@ -1103,7 +1091,6 @@
             if (result) {
                 rec.score = result.star;
                 rec.scoreResult = result;
-                console.log('[评分]', result);
                 renderMyRecordings();
                 showScorePanel(result);
             } else {

@@ -695,6 +695,7 @@ tbody tr:last-child td { border-bottom: none; }
     position: relative;
     min-width: 0;
     width: 0;
+    min-height: 0;
 }
 
 .editor-wave-toolbar {
@@ -709,15 +710,16 @@ tbody tr:last-child td { border-bottom: none; }
     min-width: 0;
 }
 .waveform-area {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
     position: relative;
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: auto;
     scrollbar-gutter: stable both-edges;
-    min-height: 318px;
+    min-height: 0;
     min-width: 0;
     width: 100%;
     background: var(--bg);
+    padding: 28px 16px 8px;
 }
 .wave-host {
     position: relative;
@@ -727,7 +729,7 @@ tbody tr:last-child td { border-bottom: none; }
     width: max-content;
     max-width: none;
     flex: 0 0 auto;
-    padding-top: 60px;
+    padding-top: 0;
 }
 
 #waveformWrap {
@@ -736,10 +738,13 @@ tbody tr:last-child td { border-bottom: none; }
     position: relative;
     isolation: isolate;
     overflow: hidden;
+    background: var(--card);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
 }
 .seg-overlay-container {
     position: absolute;
-    top: 60px;
+    top: 0;
     left: 0;
     width: 100%;
     height: 220px;
@@ -751,7 +756,7 @@ tbody tr:last-child td { border-bottom: none; }
     position: absolute;
     left: 0;
     right: 0;
-    top: 280px;
+    top: 232px;
     height: 34px;
     pointer-events: auto;
     z-index: 9;
@@ -783,7 +788,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .wave-progress-line {
     position: absolute;
-    top: 60px;
+    top: 0;
     height: 220px;
     width: 2px;
     background: #ef4444;
@@ -793,7 +798,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .wave-progress-handle {
     position: absolute;
-    top: 38px;
+    top: -22px;
 
     transform: translateX(-50%);
     width: 16px;
@@ -1263,6 +1268,129 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* 独唱/合唱标签 */
 .badge-chorus { background: #fdf2f8; color: #db2777; }
+
+/* ===== 合成导出模块 ===== */
+.export-toolbar { display:flex; align-items:center; gap:12px; padding:12px 16px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; margin-bottom:16px; flex-wrap:wrap; }
+.export-toolbar select { padding:7px 12px; border:1.5px solid var(--border); border-radius:6px; font-size:14px; min-width:220px; }
+.export-toolbar .btn { white-space:nowrap; }
+.export-status { font-size:12px; color:var(--text-secondary); margin-left:auto; }
+
+/* 波形+唱段覆盖区 */
+.export-wave-panel { position:relative; background:#1e1b4b; border-radius:8px; overflow:hidden; margin-bottom:16px; }
+.export-wave-scroll { overflow-x:auto; overflow-y:hidden; position:relative; cursor:grab; scrollbar-width:thin; scrollbar-color:#6366f1 #312e81; }
+.export-wave-scroll:active { cursor:grabbing; }
+.export-wave-scroll::-webkit-scrollbar { height:10px; }
+.export-wave-scroll::-webkit-scrollbar-track { background:#312e81; border-radius:0 0 8px 8px; }
+.export-wave-scroll::-webkit-scrollbar-thumb { background:#6366f1; border-radius:5px; }
+.export-wave-scroll::-webkit-scrollbar-thumb:hover { background:#818cf8; }
+.export-wave-host { position:relative; min-height:240px; }
+.export-overlay { position:absolute; top:0; left:0; right:0; bottom:0; pointer-events:none; z-index:2; }
+
+/* 时间标尺 */
+.export-timeline { position:relative; height:22px; background:rgba(255,255,255,.06); border-top:1px solid rgba(255,255,255,.1); user-select:none; }
+.export-timeline .tick { position:absolute; top:0; height:100%; border-left:1px solid rgba(255,255,255,.15); }
+.export-timeline .tick-label { position:absolute; top:3px; left:3px; font-size:9px; color:rgba(255,255,255,.5); font-family:monospace; white-space:nowrap; }
+.export-seg-block { position:absolute; top:0; bottom:0; border-radius:4px; opacity:0.45; cursor:pointer; pointer-events:all; transition:opacity .15s; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; padding-top:4px; gap:2px; overflow:hidden; }
+.export-seg-block:hover { opacity:0.65; }
+.export-seg-block.active { opacity:0.75; box-shadow:0 0 0 2px #fff inset; }
+.export-seg-block .seg-label { font-size:10px; color:#fff; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.5); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; padding:0 3px; }
+.export-seg-block .seg-type-badge { font-size:9px; padding:1px 5px; border-radius:8px; color:#fff; font-weight:500; }
+.export-seg-block .seg-type-badge.solo { background:rgba(59,130,246,.8); }
+.export-seg-block .seg-type-badge.chorus { background:rgba(219,39,119,.8); }
+
+/* 迷你胶囊录音卡片（覆盖在唱段块上） */
+.mini-rec-capsule { display:inline-flex; align-items:center; gap:3px; background:rgba(255,255,255,.9); border-radius:10px; padding:1px 6px 1px 4px; font-size:9px; color:#334155; cursor:pointer; pointer-events:all; white-space:nowrap; max-width:100%; box-shadow:0 1px 3px rgba(0,0,0,.2); line-height:16px; }
+.mini-rec-capsule:hover { background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.3); }
+.mini-rec-capsule .mini-wave { width:36px; height:14px; border-radius:3px; overflow:hidden; flex-shrink:0; }
+.mini-rec-capsule .mini-play { width:14px; height:14px; border-radius:50%; background:var(--primary); color:#fff; display:flex; align-items:center; justify-content:center; font-size:7px; flex-shrink:0; cursor:pointer; }
+.mini-rec-capsule .mini-name { overflow:hidden; text-overflow:ellipsis; max-width:50px; }
+
+/* 底部录音详情区 */
+.export-rec-panel { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; }
+.export-rec-header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); }
+.export-rec-header h4 { margin:0; font-size:14px; font-weight:600; }
+.export-rec-body { padding:12px 16px; display:grid; grid-template-columns:repeat(4,1fr); gap:10px; max-height:400px; overflow-y:auto; }
+.export-rec-empty { text-align:center; padding:40px 16px; color:var(--text-light); font-size:13px; }
+
+/* 大录音卡片 */
+.rec-card-lg { display:flex; flex-direction:column; gap:6px; padding:10px; background:var(--bg-main); border:1.5px solid var(--border); border-radius:8px; transition:border-color .15s, box-shadow .15s; }
+.rec-card-lg:hover { border-color:var(--primary-light); }
+.rec-card-lg.selected { border-color:var(--primary); box-shadow:0 0 0 2px rgba(79,70,229,.15); background:#f5f3ff; }
+.rec-card-lg .rec-check { width:16px; height:16px; accent-color:var(--primary); cursor:pointer; flex-shrink:0; }
+.rec-card-lg .rec-top { display:flex; align-items:center; gap:6px; }
+.rec-card-lg .rec-info { flex:1; min-width:0; }
+.rec-card-lg .rec-info .rec-user { font-weight:600; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rec-card-lg .rec-info .rec-time { font-size:10px; color:var(--text-light); font-family:monospace; }
+.rec-card-lg .rec-wave-wrap { width:100%; height:32px; border-radius:4px; overflow:hidden; }
+.rec-card-lg .rec-bottom { display:flex; align-items:center; justify-content:space-between; }
+.rec-card-lg .rec-play-btn { width:28px; height:28px; border-radius:50%; border:none; background:var(--primary); color:#fff; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background .15s; }
+.rec-card-lg .rec-play-btn:hover { background:var(--primary-dark); }
+.rec-card-lg .rec-score { font-size:11px; color:var(--text-secondary); }
+
+/* 全曲播放条 */
+.export-playbar { display:flex; align-items:center; gap:10px; padding:8px 16px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; margin-bottom:16px; }
+.export-playbar .play-btn-main { width:36px; height:36px; border-radius:50%; border:none; background:var(--primary); color:#fff; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.export-playbar .play-btn-main:hover { background:var(--primary-dark); }
+.export-playbar .playbar-time { font-size:12px; font-family:monospace; color:var(--text-secondary); min-width:100px; }
+.export-playbar .playbar-track { flex:1; height:4px; background:var(--border); border-radius:2px; position:relative; cursor:pointer; }
+.export-playbar .playbar-fill { height:100%; background:var(--primary); border-radius:2px; transition:width .1s linear; }
+
+/* 光标线 */
+.export-cursor-line { position:absolute; top:0; bottom:0; width:2px; background:#ef4444; z-index:10; pointer-events:none; transition:left .05s linear; }
+
+/* 波形区域点击定位 */
+.export-wave-host { cursor:crosshair; }
+
+/* 伴奏上传 */
+.acc-upload-btn { position:relative; overflow:hidden; }
+.acc-upload-btn input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; font-size:0; }
+.acc-status { font-size:12px; padding:4px 10px; border-radius:12px; white-space:nowrap; }
+.acc-status.pass { background:#d1fae5; color:#059669; }
+.acc-status.fail { background:#fee2e2; color:#dc2626; }
+.acc-status.uploading { background:#e0e7ff; color:#4f46e5; }
+
+/* 伴奏空白提示 */
+.export-acc-hint { text-align:center; padding:60px 20px; color:var(--text-light); font-size:14px; background:var(--card); border-radius:8px; border:1px dashed var(--border); margin-bottom:16px; }
+
+/* 取消页面横向滚动 */
+.main-content { overflow-x:hidden; }
+
+/* 歌曲卡片伴奏区域 */
+.song-card-acc {
+    padding: 0 16px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+}
+.song-card-acc .acc-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: #16a34a;
+    font-weight: 500;
+}
+.song-card-acc .acc-upload-btn {
+    font-size: 12px;
+    padding: 4px 10px;
+}
+
+/* 音频文件丢失的歌曲卡片 */
+.song-card-missing {
+    border-color: #fbbf24 !important;
+    background: #fffbeb !important;
+}
+.song-card-warning {
+    padding: 6px 16px;
+    font-size: 12px;
+    color: #b45309;
+    background: #fef3c7;
+    border-bottom: 1px solid #fde68a;
+    font-weight: 500;
+}
+
+/* 录音卡片空状态跨列 */
+.export-rec-empty { grid-column:1/-1; }
 
 /* ===== 响应式 ===== */
 @media (max-width: 768px) {
