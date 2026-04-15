@@ -279,12 +279,12 @@ def _ai_split_segments(song_id: str, filepath: str, duration: float) -> tuple:
     """AI 歌词识别切分 + 自动标注合唱和难度
     返回 (segments_list, ai_split_success)
     成功: 返回按歌词切分的唱段列表（含合唱/难度标注）, True
-    失败: 返回空列表, False
+    失败: 尝试备用静音切分，返回 (segments, False)
     """
     whisper_result = _whisper_transcribe(filepath)
     if not whisper_result:
-        print(f"[ai_split] whisper failed for song {song_id}, returning empty")
-        return [], False
+        print(f"[ai_split] whisper failed for song {song_id}, trying fallback silence split")
+        return _fallback_split_segments(song_id, filepath, duration)
 
     # 第一步：检测副歌段落
     chorus_indices = _detect_chorus_segments(whisper_result)
@@ -324,6 +324,84 @@ def _ai_split_segments(song_id: str, filepath: str, duration: float) -> tuple:
         diff_stats[s["difficulty"]] = diff_stats.get(s["difficulty"], 0) + 1
     print(f"[ai_split] song {song_id}: {len(segments)} segments, chorus={chorus_count}, difficulty={diff_stats}")
     return segments, True
+
+
+def _fallback_split_segments(song_id: str, filepath: str, duration: float) -> tuple:
+    """备用切分方案：基于静音检测或等时长切分
+    当 Whisper 不可用时自动使用此方案
+    """
+    split_points = [0.0]
+
+    # 方案1: 使用 librosa 静音检测
+    try:
+        import librosa
+        import numpy as np
+        y, sr = librosa.load(filepath, sr=22050, mono=True)
+        # 检测非静音区间
+        intervals = librosa.effects.split(y, top_db=30, frame_length=2048, hop_length=512)
+        if len(intervals) > 1:
+            # 将静音间隙位置作为切分点
+            for i in range(len(intervals) - 1):
+                gap_start = intervals[i][1] / sr
+                gap_end = intervals[i + 1][0] / sr
+                gap_mid = (gap_start + gap_end) / 2.0
+                # 只在间隙足够大时切分（>0.3秒）
+                if gap_end - gap_start >= 0.3:
+                    split_points.append(round(gap_mid, 2))
+            split_points.append(round(duration, 2))
+            print(f"[fallback] librosa silence split: {len(split_points)-1} segments")
+        else:
+            split_points = None  # 没检测到有效间隙，用等时长切分
+    except Exception as e:
+        print(f"[fallback] librosa split failed: {e}")
+        split_points = None
+
+    # 方案2: 等时长切分（每段约10秒）
+    if not split_points or len(split_points) < 3:
+        seg_dur = 10.0  # 默认每段10秒
+        count = max(2, int(duration / seg_dur))
+        seg_dur = duration / count
+        split_points = [round(i * seg_dur, 2) for i in range(count + 1)]
+        print(f"[fallback] equal-time split: {count} segments, ~{seg_dur:.1f}s each")
+
+    # 合并过短的段（<3秒）
+    merged = [split_points[0]]
+    for p in split_points[1:]:
+        if p - merged[-1] < 3.0 and p != split_points[-1]:
+            continue  # 跳过，与前一段合并
+        merged.append(p)
+    # 确保最后一个点是 duration
+    if merged[-1] < duration - 0.5:
+        merged.append(round(duration, 2))
+    split_points = merged
+
+    # 构建唱段
+    segments = []
+    for i in range(len(split_points) - 1):
+        seg_id = f"{song_id}-{i+1:02d}"
+        while seg_id in SEGMENTS_DB:
+            seg_id = f"{song_id}-{uuid.uuid4().hex[:4]}"
+        start_t = split_points[i]
+        end_t = split_points[i + 1]
+        seg = {
+            "id": seg_id,
+            "song_id": song_id,
+            "index": i + 1,
+            "start_time": start_t,
+            "end_time": end_t,
+            "lyrics": "",
+            "difficulty": "medium",
+            "is_chorus": False,
+            "status": "unassigned",
+            "claim_count": 0,
+            "submit_count": 0,
+            "claims": [],
+        }
+        SEGMENTS_DB[seg_id] = seg
+        segments.append(seg)
+
+    print(f"[fallback] song {song_id}: created {len(segments)} segments (fallback mode)")
+    return segments, False
 
 
 # ============ 初始化数据：从文件加载 ============

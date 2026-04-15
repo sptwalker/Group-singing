@@ -215,7 +215,7 @@ async function doUploadSong() {
 
         closeModal();
         if (result.data.ai_split === false) {
-            showToast(`歌曲 "${title}" 上传成功，AI无法自动切分，请手动切分`, 'warning');
+            showToast(`歌曲 "${title}" 上传成功，已自动切分为 ${result.data.segment_count || '若干'} 个唱段（基于静音检测，歌词需手动填写）`, 'warning');
         } else {
             showToast(`歌曲 "${title}" 上传成功，AI已识别歌词并切分为 ${result.data.segment_count} 个唱段`, 'success');
         }

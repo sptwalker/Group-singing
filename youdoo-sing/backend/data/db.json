@@ -1806,6 +1806,21 @@
       "accompaniment_url": "/api/uploads/acc_e7f58ac7.mp3",
       "accompaniment_file": "acc_e7f58ac7.mp3",
       "accompaniment_duration": 322.1
+    },
+    "5590d52e": {
+      "id": "5590d52e",
+      "title": "Cupid",
+      "artist": "FIFTY FIFTY",
+      "duration": 174.34,
+      "audio_url": "/api/uploads/5590d52e.mp3",
+      "audio_file": "5590d52e.mp3",
+      "original_filename": "FIFTY FIFTY - Cupid.mp3",
+      "segment_count": 0,
+      "participant_count": 0,
+      "completion": 0.0,
+      "segments": [],
+      "ai_split": false,
+      "created_at": "2026-04-15 23:27:52"
     }
   },
   "segments": {
@@ -4206,5 +4221,6 @@
       "nickname": "微信用户3240",
       "avatar": "https://api.dicebear.com/7.x/fun-emoji/svg?seed=微信用户3240"
     }
-  }
+  },
+  "finals": {}
 }
