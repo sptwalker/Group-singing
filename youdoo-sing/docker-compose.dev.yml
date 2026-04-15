@@ -1,0 +1,24 @@
+# 轻量开发模式：仅应用容器，使用本地 JSON 文件存储（无需 PostgreSQL/Redis）
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: youdoo-sing-dev
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # 开发模式：直接挂载本地目录，代码修改即时生效
+      - ./backend:/app/backend
+      - ./frontend/public:/app/frontend/public
+      - ../music:/music:ro
+    environment:
+      - DEBUG=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
