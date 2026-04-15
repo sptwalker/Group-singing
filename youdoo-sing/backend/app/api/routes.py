@@ -377,10 +377,6 @@ def _calculate_artist_score(artist1: str, artist2: str) -> float:
         list1 = [a1]
     if not list2:
         list2 = [a2]
-    # 计算最佳匹配得分
-    scores = [_text_difference(x, y) for x in list1 for y in list2]
-    if not scores:
-        return 0.0
     # 贪心匹配
     all_pairs = [(i, j, _text_difference(list1[i], list2[j]))
                  for i in range(len(list1)) for j in range(len(list2))]
@@ -632,7 +628,6 @@ def _split_and_analyze(song_id: str, filepath: str, duration: float, full_lyrics
 
     # ---- 第三步：歌词分配 ----
     has_lyrics = False
-    auto_fetched = False
     if full_lyrics and full_lyrics.strip():
         if _is_lrc_format(full_lyrics):
             # LRC 格式：精确时间标记，直接解析分配
@@ -659,7 +654,6 @@ def _split_and_analyze(song_id: str, filepath: str, duration: float, full_lyrics
                 segments = _assign_lrc_to_segments(segments, lrc_lines)
                 has_lyrics = any(s["lyrics"] for s in segments)
                 if has_lyrics:
-                    auto_fetched = True
                     print(f"[split] auto-fetched lyrics via {fetch_result['method']} "
                           f"(score={fetch_result['match_score']}, {len(lrc_lines)} lines)")
         if not has_lyrics:
