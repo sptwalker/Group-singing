@@ -1,8 +1,19 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.api.routes import router
 import os
+
+# 加载 .env 文件（本地开发用）
+try:
+    from dotenv import load_dotenv
+    _env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path)
+        print(f"[env] loaded .env from {_env_path}")
+except ImportError:
+    pass
+
+from app.api.routes import router
 
 app = FastAPI(
     title="YouDoo Sing API",

@@ -10,7 +10,14 @@ import shutil
 import subprocess
 import threading
 import traceback
+import re
 from datetime import datetime
+
+# OpenAI API 配置
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+OPENAI_WHISPER_MODEL = os.environ.get("OPENAI_WHISPER_MODEL", "whisper-1")
+OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -139,52 +146,90 @@ def _get_audio_duration(filepath: str) -> float:
 
 
 def _whisper_transcribe(filepath: str) -> list:
-    """用 Whisper 识别音频歌词，返回带时间戳的片段列表
+    """用 OpenAI Whisper API 识别音频歌词，返回带时间戳的片段列表
     返回: [{"start": float, "end": float, "text": str}, ...] 或 None（失败）
     """
+    if not OPENAI_API_KEY:
+        print("[whisper-api] OPENAI_API_KEY not set, skipping")
+        return None
+
     try:
-        import whisper
-        print(f"[whisper] loading model for: {filepath}")
-        model = whisper.load_model("base")
-        result = model.transcribe(filepath, language=None, verbose=False)
-        segments = result.get("segments", [])
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
+
+        # 检查文件大小，Whisper API 限制 25MB
+        file_size = os.path.getsize(filepath)
+        audio_path = filepath
+        if file_size > 24 * 1024 * 1024:
+            print(f"[whisper-api] file too large ({file_size/1024/1024:.1f}MB), converting to mp3")
+            mp3_path = filepath + ".tmp.mp3"
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", filepath, "-b:a", "128k", "-ac", "1", mp3_path],
+                    capture_output=True, timeout=120
+                )
+                if os.path.exists(mp3_path) and os.path.getsize(mp3_path) < 25 * 1024 * 1024:
+                    audio_path = mp3_path
+                else:
+                    print("[whisper-api] compressed file still too large")
+                    if os.path.exists(mp3_path):
+                        os.remove(mp3_path)
+                    return None
+            except Exception as e:
+                print(f"[whisper-api] compression failed: {e}")
+                return None
+
+        print(f"[whisper-api] transcribing: {os.path.basename(filepath)}")
+        with open(audio_path, "rb") as f:
+            result = client.audio.transcriptions.create(
+                model=OPENAI_WHISPER_MODEL,
+                file=f,
+                response_format="verbose_json",
+                timestamp_granularities=["segment"],
+            )
+
+        # 清理临时文件
+        if audio_path != filepath and os.path.exists(audio_path):
+            os.remove(audio_path)
+
+        segments = getattr(result, "segments", None) or []
         if not segments:
-            print("[whisper] no segments detected")
+            print("[whisper-api] no segments detected")
             return None
-        lang = result.get("language", "unknown")
-        print(f"[whisper] detected language: {lang}, {len(segments)} segments")
-        # 过滤掉纯空白或过短片段，合并过短的相邻片段
+
+        lang = getattr(result, "language", "unknown")
+        print(f"[whisper-api] detected language: {lang}, {len(segments)} raw segments")
+
+        # 清洗：过滤空白/过短片段，合并过短相邻片段
         cleaned = []
         for seg in segments:
-            text = seg.get("text", "").strip()
+            text = (seg.get("text", "") if isinstance(seg, dict) else getattr(seg, "text", "")).strip()
             if not text:
                 continue
-            start = round(seg["start"], 2)
-            end = round(seg["end"], 2)
+            start = round(seg.get("start", 0) if isinstance(seg, dict) else getattr(seg, "start", 0), 2)
+            end = round(seg.get("end", 0) if isinstance(seg, dict) else getattr(seg, "end", 0), 2)
             if end - start < 0.5:
                 continue
-            # 如果与上一段间隔很小且上一段很短，合并
             if cleaned and (start - cleaned[-1]["end"]) < 0.3 and (cleaned[-1]["end"] - cleaned[-1]["start"]) < 3.0:
                 cleaned[-1]["end"] = end
                 cleaned[-1]["text"] = cleaned[-1]["text"] + " " + text
             else:
                 cleaned.append({"start": start, "end": end, "text": text})
+
         if not cleaned:
             return None
-        print(f"[whisper] cleaned to {len(cleaned)} segments")
+        print(f"[whisper-api] cleaned to {len(cleaned)} segments")
         return cleaned
     except Exception as e:
-        print(f"[whisper] transcription failed: {e}")
-        import traceback
+        print(f"[whisper-api] transcription failed: {e}")
         traceback.print_exc()
         return None
 
 
 def _normalize_lyrics(text: str) -> str:
     """将歌词归一化用于相似度比较：去标点、转小写、去多余空白"""
-    import re
     t = text.lower().strip()
-    t = re.sub(r'[^\w\s\u4e00-\u9fff]', '', t)  # 保留中英文字符和空白
+    t = re.sub(r'[^\w\s\u4e00-\u9fff]', '', t)
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
@@ -198,13 +243,11 @@ def _detect_chorus_segments(whisper_segments: list) -> set:
     n = len(whisper_segments)
     normalized = [_normalize_lyrics(ws["text"]) for ws in whisper_segments]
 
-    # 构建相似度矩阵，找出重复出现的歌词
     repeat_count = [0] * n
     for i in range(n):
         for j in range(i + 1, n):
             if not normalized[i] or not normalized[j]:
                 continue
-            # 短文本用精确比较，长文本用模糊匹配
             if len(normalized[i]) < 4 or len(normalized[j]) < 4:
                 sim = 1.0 if normalized[i] == normalized[j] else 0.0
             else:
@@ -213,13 +256,11 @@ def _detect_chorus_segments(whisper_segments: list) -> set:
                 repeat_count[i] += 1
                 repeat_count[j] += 1
 
-    # 重复出现的歌词段标记为副歌
     chorus_indices = set()
     for i, cnt in enumerate(repeat_count):
-        if cnt >= 1:  # 至少有1个相似段 = 至少出现2次
+        if cnt >= 1:
             chorus_indices.add(i)
 
-    # 扩展：如果连续段中大部分是副歌，把夹在中间的也标为副歌（副歌通常是连续的）
     if chorus_indices and n > 3:
         expanded = set(chorus_indices)
         for i in range(1, n - 1):
@@ -231,23 +272,13 @@ def _detect_chorus_segments(whisper_segments: list) -> set:
 
 
 def _estimate_difficulty(text: str, start: float, end: float, is_chorus: bool) -> str:
-    """估算唱段难度。
-    规则：
-    - 歌词密度（字数/秒）高 → 更难（唱得快）
-    - 唱段时长短且密度高 → 更难
-    - 副歌段通常需要更大声量和情感 → 基础难度+1
-    返回: 'easy' / 'normal' / 'hard'
-    """
+    """估算唱段难度（规则方式，作为 GPT 分析的备用）"""
     dur = max(end - start, 0.5)
-    # 计算有效字符数（中文每字算1，英文每词算1）
-    import re
     chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
     english_words = len(re.findall(r'[a-zA-Z]+', text))
     char_count = chinese_chars + english_words
+    density = char_count / dur
 
-    density = char_count / dur  # 字/秒
-
-    # 基础难度评分 0-10
     score = 0
     if density > 4.0:
         score += 4
@@ -259,13 +290,13 @@ def _estimate_difficulty(text: str, start: float, end: float, is_chorus: bool) -
     if dur < 3.0 and density > 2.0:
         score += 2
     elif dur > 8.0:
-        score += 1  # 长段需要气息控制
+        score += 1
 
     if is_chorus:
-        score += 2  # 副歌通常更有表现力要求
+        score += 2
 
     if char_count > 20:
-        score += 1  # 歌词多需要记忆
+        score += 1
 
     if score >= 5:
         return "hard"
@@ -275,23 +306,96 @@ def _estimate_difficulty(text: str, start: float, end: float, is_chorus: bool) -
         return "easy"
 
 
+def _gpt_analyze_lyrics(whisper_segments: list) -> dict:
+    """用 GPT 分析歌词，智能识别副歌段落和难度评估
+    返回: {"chorus": [索引列表], "difficulty": {"0": "easy", "1": "normal", ...}} 或 None
+    """
+    if not OPENAI_API_KEY:
+        return None
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
+
+        lyrics_list = []
+        for i, ws in enumerate(whisper_segments):
+            dur = round(ws["end"] - ws["start"], 1)
+            lyrics_list.append(f"[{i}] ({dur}s) {ws['text'].strip()}")
+        lyrics_text = "\n".join(lyrics_list)
+
+        prompt = f"""分析以下歌曲的歌词片段，完成两个任务：
+
+1. **副歌识别**：找出属于副歌（chorus/hook）的片段索引。副歌通常是歌曲中重复出现、旋律高亢、情感最强烈的部分。
+2. **难度评估**：为每个片段评估演唱难度（easy/normal/hard）。考虑因素：
+   - 歌词密度（字数多且时间短=难）
+   - 是否副歌（副歌通常需要更强的表现力）
+   - 音域跨度暗示（根据歌词内容推测）
+   - 节奏复杂度
+
+歌词片段：
+{lyrics_text}
+
+请严格按以下 JSON 格式回复，不要包含任何其他文字：
+{{"chorus": [副歌片段的索引号], "difficulty": {{"0": "easy", "1": "normal", ...}}}}"""
+
+        print(f"[gpt] analyzing {len(whisper_segments)} segments...")
+        response = client.chat.completions.create(
+            model=OPENAI_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": "你是一位专业的音乐分析师，擅长分析歌曲结构。只返回JSON，不要其他内容。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=1000,
+        )
+
+        content = response.choices[0].message.content.strip()
+        # 提取 JSON（兼容 markdown code block）
+        if "```" in content:
+            content = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
+            content = content.group(1) if content else ""
+        result = json.loads(content)
+
+        chorus = result.get("chorus", [])
+        difficulty = result.get("difficulty", {})
+        print(f"[gpt] analysis done: chorus={chorus}, difficulty_counts={{}}")
+        # 统计难度分布
+        diff_counts = {}
+        for d in difficulty.values():
+            diff_counts[d] = diff_counts.get(d, 0) + 1
+        print(f"[gpt] difficulty distribution: {diff_counts}")
+
+        return {"chorus": set(int(x) for x in chorus), "difficulty": {str(k): v for k, v in difficulty.items()}}
+    except Exception as e:
+        print(f"[gpt] lyrics analysis failed: {e}")
+        traceback.print_exc()
+        return None
+
+
 def _ai_split_segments(song_id: str, filepath: str, duration: float) -> tuple:
-    """AI 歌词识别切分 + 自动标注合唱和难度
+    """AI 歌词识别切分 + 智能标注合唱和难度
+    流程: Whisper API 识别歌词 → GPT 分析副歌/难度 → 构建唱段
     返回 (segments_list, ai_split_success)
-    成功: 返回按歌词切分的唱段列表（含合唱/难度标注）, True
-    失败: 尝试备用静音切分，返回 (segments, False)
     """
     whisper_result = _whisper_transcribe(filepath)
     if not whisper_result:
         print(f"[ai_split] whisper failed for song {song_id}, trying fallback silence split")
         return _fallback_split_segments(song_id, filepath, duration)
 
-    # 第一步：检测副歌段落
-    chorus_indices = _detect_chorus_segments(whisper_result)
-    chorus_count = len(chorus_indices)
-    print(f"[ai_split] detected {chorus_count} chorus segments out of {len(whisper_result)}")
+    # 用 GPT 分析副歌和难度
+    gpt_result = _gpt_analyze_lyrics(whisper_result)
 
-    # 第二步：构建唱段，自动标注难度和合唱
+    # 如果 GPT 分析成功，使用 GPT 结果；否则回退到规则方式
+    if gpt_result:
+        chorus_indices = gpt_result["chorus"]
+        gpt_difficulty = gpt_result["difficulty"]
+        print(f"[ai_split] using GPT analysis: {len(chorus_indices)} chorus segments")
+    else:
+        chorus_indices = _detect_chorus_segments(whisper_result)
+        gpt_difficulty = None
+        print(f"[ai_split] GPT unavailable, using rule-based: {len(chorus_indices)} chorus segments")
+
+    # 构建唱段
     segments = []
     for i, ws in enumerate(whisper_result):
         seg_id = f"{song_id}-{i+1:02d}"
@@ -300,7 +404,14 @@ def _ai_split_segments(song_id: str, filepath: str, duration: float) -> tuple:
         lyrics = ws["text"].strip()
         is_chorus = i in chorus_indices
         end_time = min(ws["end"], duration)
-        difficulty = _estimate_difficulty(lyrics, ws["start"], end_time, is_chorus)
+
+        # 优先使用 GPT 难度评估，否则用规则
+        if gpt_difficulty and str(i) in gpt_difficulty:
+            difficulty = gpt_difficulty[str(i)]
+            if difficulty not in ("easy", "normal", "hard"):
+                difficulty = _estimate_difficulty(lyrics, ws["start"], end_time, is_chorus)
+        else:
+            difficulty = _estimate_difficulty(lyrics, ws["start"], end_time, is_chorus)
 
         seg = {
             "id": seg_id,
@@ -322,6 +433,7 @@ def _ai_split_segments(song_id: str, filepath: str, duration: float) -> tuple:
     diff_stats = {}
     for s in segments:
         diff_stats[s["difficulty"]] = diff_stats.get(s["difficulty"], 0) + 1
+    chorus_count = sum(1 for s in segments if s["is_chorus"])
     print(f"[ai_split] song {song_id}: {len(segments)} segments, chorus={chorus_count}, difficulty={diff_stats}")
     return segments, True
 

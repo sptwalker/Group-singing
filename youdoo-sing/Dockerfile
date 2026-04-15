@@ -15,13 +15,13 @@ WORKDIR /app
 # 先复制依赖文件，利用 Docker 层缓存
 COPY backend/requirements.txt /app/backend/requirements.txt
 
-# 安装 Python 依赖（跳过 whisper 避免下载大模型，生产环境按需开启）
+# 安装 Python 依赖
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt 2>/dev/null || \
     pip install --no-cache-dir \
     fastapi uvicorn python-multipart \
     sqlalchemy alembic psycopg2-binary \
     pydantic pydantic-settings python-dotenv \
-    librosa soundfile mutagen scipy numpy
+    librosa soundfile mutagen scipy numpy openai
 
 # 复制后端代码
 COPY backend/ /app/backend/

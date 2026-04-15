@@ -217,7 +217,7 @@ async function doUploadSong() {
         if (result.data.ai_split === false) {
             showToast(`歌曲 "${title}" 上传成功，已自动切分为 ${result.data.segment_count || '若干'} 个唱段（基于静音检测，歌词需手动填写）`, 'warning');
         } else {
-            showToast(`歌曲 "${title}" 上传成功，AI已识别歌词并切分为 ${result.data.segment_count} 个唱段`, 'success');
+            showToast(`歌曲 "${title}" 上传成功，AI已识别歌词并智能切分为 ${result.data.segment_count} 个唱段（含副歌/难度标注）`, 'success');
         }
 
         // 跳转到分段编辑器
