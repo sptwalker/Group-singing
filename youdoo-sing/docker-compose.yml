@@ -21,9 +21,8 @@ services:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/youdoo_sing
       - REDIS_URL=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
-      - OPENAI_WHISPER_MODEL=${OPENAI_WHISPER_MODEL:-whisper-1}
-      - OPENAI_CHAT_MODEL=${OPENAI_CHAT_MODEL:-gpt-4o-mini}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
+      - OPENAI_CHAT_MODEL=${OPENAI_CHAT_MODEL:-deepseek-ai/DeepSeek-V3}
     depends_on:
       db:
         condition: service_healthy

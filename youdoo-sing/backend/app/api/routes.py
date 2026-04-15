@@ -12,12 +12,13 @@ import threading
 import traceback
 import re
 from datetime import datetime
+from difflib import SequenceMatcher
+import httpx
 
-# OpenAI API 配置
+# OpenAI API 配置（用于 DeepSeek 等兼容接口）
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-OPENAI_WHISPER_MODEL = os.environ.get("OPENAI_WHISPER_MODEL", "whisper-1")
-OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1")
+OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "deepseek-ai/DeepSeek-V3")
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -145,134 +146,382 @@ def _get_audio_duration(filepath: str) -> float:
     return 0.0
 
 
-def _whisper_transcribe(filepath: str) -> list:
-    """用 OpenAI Whisper API 识别音频歌词，返回带时间戳的片段列表
-    返回: [{"start": float, "end": float, "text": str}, ...] 或 None（失败）
+def _parse_lrc(lrc_text: str) -> list:
+    """解析 LRC 格式歌词，返回 [(time_sec, text), ...] 按时间排序
+    支持格式：[mm:ss.xx]歌词  或  [mm:ss]歌词
+    自动跳过元数据标签（[ti:], [ar:], [al:] 等）
     """
-    if not OPENAI_API_KEY:
-        print("[whisper-api] OPENAI_API_KEY not set, skipping")
-        return None
+    lines = []
+    # 匹配 [mm:ss.xx] 或 [mm:ss] 格式，支持一行多时间标签
+    pattern = re.compile(r'\[(\d{1,3}):(\d{2})(?:[.:])(\d{1,3})?\]')
+    meta_tags = {'ti', 'ar', 'al', 'by', 'offset', 'length', 're', 've'}
+
+    for raw_line in lrc_text.splitlines():
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        # 跳过元数据标签
+        meta_match = re.match(r'^\[([a-z]+):', raw_line, re.IGNORECASE)
+        if meta_match and meta_match.group(1).lower() in meta_tags:
+            continue
+
+        # 提取所有时间标签和歌词文本
+        timestamps = []
+        for m in pattern.finditer(raw_line):
+            minutes = int(m.group(1))
+            seconds = int(m.group(2))
+            centiseconds = int(m.group(3)) if m.group(3) else 0
+            # 兼容 mm:ss.xx (百分秒) 和 mm:ss.xxx (毫秒)
+            if m.group(3) and len(m.group(3)) == 3:
+                frac = centiseconds / 1000.0
+            else:
+                frac = centiseconds / 100.0
+            t = minutes * 60 + seconds + frac
+            timestamps.append(round(t, 2))
+
+        # 提取歌词文本（去掉所有时间标签）
+        text = pattern.sub('', raw_line).strip()
+
+        for t in timestamps:
+            lines.append((t, text))
+
+    lines.sort(key=lambda x: x[0])
+    return lines
+
+
+def _assign_lrc_to_segments(segments: list, lrc_lines: list) -> list:
+    """将 LRC 时间标记歌词精确分配到各唱段
+    每句歌词按其时间戳归属到对应的唱段区间 [start_time, end_time)
+    同时用规则检测副歌（重复歌词）和评估难度
+    """
+    # 按时间将歌词句归属到唱段
+    for seg in segments:
+        seg_lyrics = []
+        for t, text in lrc_lines:
+            if text and seg["start_time"] <= t < seg["end_time"]:
+                seg_lyrics.append(text)
+        seg["lyrics"] = "\n".join(seg_lyrics)
+
+    # 副歌检测：找出重复出现的歌词段落
+    lyrics_list = [seg["lyrics"].strip() for seg in segments]
+    for i, seg in enumerate(segments):
+        text = lyrics_list[i]
+        if not text:
+            continue
+        # 如果这段歌词在其他段也出现过（完全相同或高度相似），标记为副歌
+        repeat_count = sum(1 for j, other in enumerate(lyrics_list) if j != i and other == text)
+        if repeat_count >= 1:
+            seg["is_chorus"] = True
+
+    # 难度评估
+    for seg in segments:
+        seg["difficulty"] = _estimate_difficulty(
+            seg["lyrics"], seg["start_time"], seg["end_time"], seg.get("is_chorus", False)
+        )
+
+    assigned = sum(1 for s in segments if s["lyrics"].strip())
+    chorus = sum(1 for s in segments if s.get("is_chorus"))
+    print(f"[lrc] lyrics assigned to {assigned}/{len(segments)} segments, chorus={chorus}")
+    return segments
+
+
+def _ai_assign_lyrics(segments: list, full_lyrics: str) -> list:
+    """用 AI 将完整歌词智能分配到各唱段，同时识别副歌和评估难度
+    segments: [{"index": 1, "start_time": 0.0, "end_time": 8.5, ...}, ...]
+    full_lyrics: 完整歌词文本（每行一句）
+    返回更新后的 segments 列表
+    """
+    if not OPENAI_API_KEY or not full_lyrics.strip():
+        return segments
 
     try:
         from openai import OpenAI
         client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
 
-        # 检查文件大小，Whisper API 限制 25MB
-        file_size = os.path.getsize(filepath)
-        audio_path = filepath
-        if file_size > 24 * 1024 * 1024:
-            print(f"[whisper-api] file too large ({file_size/1024/1024:.1f}MB), converting to mp3")
-            mp3_path = filepath + ".tmp.mp3"
-            try:
-                subprocess.run(
-                    ["ffmpeg", "-y", "-i", filepath, "-b:a", "128k", "-ac", "1", mp3_path],
-                    capture_output=True, timeout=120
-                )
-                if os.path.exists(mp3_path) and os.path.getsize(mp3_path) < 25 * 1024 * 1024:
-                    audio_path = mp3_path
-                else:
-                    print("[whisper-api] compressed file still too large")
-                    if os.path.exists(mp3_path):
-                        os.remove(mp3_path)
-                    return None
-            except Exception as e:
-                print(f"[whisper-api] compression failed: {e}")
-                return None
-
-        print(f"[whisper-api] transcribing: {os.path.basename(filepath)}")
-        with open(audio_path, "rb") as f:
-            result = client.audio.transcriptions.create(
-                model=OPENAI_WHISPER_MODEL,
-                file=f,
-                response_format="verbose_json",
-                timestamp_granularities=["segment"],
-            )
-
-        # 清理临时文件
-        if audio_path != filepath and os.path.exists(audio_path):
-            os.remove(audio_path)
-
-        segments = getattr(result, "segments", None) or []
-        if not segments:
-            print("[whisper-api] no segments detected")
-            return None
-
-        lang = getattr(result, "language", "unknown")
-        print(f"[whisper-api] detected language: {lang}, {len(segments)} raw segments")
-
-        # 清洗：过滤空白/过短片段，合并过短相邻片段
-        cleaned = []
+        # 构建唱段时间信息
+        seg_info = []
         for seg in segments:
-            text = (seg.get("text", "") if isinstance(seg, dict) else getattr(seg, "text", "")).strip()
-            if not text:
-                continue
-            start = round(seg.get("start", 0) if isinstance(seg, dict) else getattr(seg, "start", 0), 2)
-            end = round(seg.get("end", 0) if isinstance(seg, dict) else getattr(seg, "end", 0), 2)
-            if end - start < 0.5:
-                continue
-            if cleaned and (start - cleaned[-1]["end"]) < 0.3 and (cleaned[-1]["end"] - cleaned[-1]["start"]) < 3.0:
-                cleaned[-1]["end"] = end
-                cleaned[-1]["text"] = cleaned[-1]["text"] + " " + text
-            else:
-                cleaned.append({"start": start, "end": end, "text": text})
+            dur = round(seg["end_time"] - seg["start_time"], 1)
+            seg_info.append(f"[{seg['index']}] {seg['start_time']:.1f}s - {seg['end_time']:.1f}s ({dur}s)")
+        seg_text = "\n".join(seg_info)
 
-        if not cleaned:
-            return None
-        print(f"[whisper-api] cleaned to {len(cleaned)} segments")
-        return cleaned
+        prompt = f"""你是一位专业的音乐编辑。现在有一首歌被按静音间隔切分成了 {len(segments)} 个唱段，请根据完整歌词，完成以下任务：
+
+1. **歌词分配**：将歌词按顺序分配到各唱段。根据每段的时长推断该段大约能唱多少歌词，合理分配。前奏/间奏/尾奏段可以为空。
+2. **副歌识别**：标记哪些唱段属于副歌（chorus）。副歌通常是重复出现、情感最强烈的部分。
+3. **难度评估**：评估每段的演唱难度（easy/normal/hard）。
+
+唱段时间信息：
+{seg_text}
+
+完整歌词：
+{full_lyrics.strip()}
+
+请严格按以下 JSON 格式回复，不要包含任何其他文字：
+{{"segments": [{{"index": 1, "lyrics": "该段歌词", "is_chorus": false, "difficulty": "normal"}}, ...]}}
+
+注意：
+- index 必须与唱段编号一一对应
+- 前奏/间奏段的 lyrics 填空字符串 ""
+- 歌词不要遗漏，按原文分配，不要修改歌词内容
+- 每段歌词可以包含多行，用换行符分隔"""
+
+        print(f"[ai] assigning lyrics to {len(segments)} segments...")
+        response = client.chat.completions.create(
+            model=OPENAI_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": "你是一位专业的音乐编辑，擅长歌曲结构分析。只返回JSON，不要其他内容。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=3000,
+        )
+
+        content = response.choices[0].message.content.strip()
+        # 提取 JSON（兼容 markdown code block）
+        if "```" in content:
+            m = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
+            content = m.group(1) if m else content
+        result = json.loads(content)
+
+        ai_segments = result.get("segments", [])
+        # 建立 index -> AI结果 的映射
+        ai_map = {item["index"]: item for item in ai_segments if "index" in item}
+
+        chorus_count = 0
+        for seg in segments:
+            ai_data = ai_map.get(seg["index"])
+            if ai_data:
+                seg["lyrics"] = ai_data.get("lyrics", "").strip()
+                seg["is_chorus"] = bool(ai_data.get("is_chorus", False))
+                difficulty = ai_data.get("difficulty", "normal")
+                seg["difficulty"] = difficulty if difficulty in ("easy", "normal", "hard") else "normal"
+                if seg["is_chorus"]:
+                    chorus_count += 1
+
+        diff_stats = {}
+        for s in segments:
+            diff_stats[s["difficulty"]] = diff_stats.get(s["difficulty"], 0) + 1
+        print(f"[ai] lyrics assigned: chorus={chorus_count}, difficulty={diff_stats}")
+        return segments
     except Exception as e:
-        print(f"[whisper-api] transcription failed: {e}")
+        print(f"[ai] lyrics assignment failed: {e}")
         traceback.print_exc()
-        return None
+        return segments
 
 
-def _normalize_lyrics(text: str) -> str:
-    """将歌词归一化用于相似度比较：去标点、转小写、去多余空白"""
-    t = text.lower().strip()
-    t = re.sub(r'[^\w\s\u4e00-\u9fff]', '', t)
-    t = re.sub(r'\s+', ' ', t).strip()
-    return t
+def _is_lrc_format(text: str) -> bool:
+    """检测文本是否为 LRC 格式（至少有3行带时间标签的歌词）"""
+    pattern = re.compile(r'^\[(\d{1,3}):(\d{2})', re.MULTILINE)
+    matches = pattern.findall(text)
+    return len(matches) >= 3
 
 
-def _detect_chorus_segments(whisper_segments: list) -> set:
-    """检测副歌（合唱）段落索引。
-    策略：歌词出现2次及以上的片段视为副歌。
-    用归一化歌词做模糊匹配，相似度>0.6即认为是同一句。
+# ============ 自动歌词获取（借鉴 LDDC 项目的匹配算法 + lrclib.net API） ============
+
+_SYMBOL_MAP = {
+    "（": "(", "）": ")", "：": ":", "！": "!", "？": "?",
+    "／": "/", "＆": "&", "＊": "*", "＠": "@", "＃": "#",
+    "＄": "$", "％": "%", "＝": "=", "＋": "+", "－": "-",
+    "＜": "<", "＞": ">", "［": "[", "］": "]", "｛": "{", "｝": "}",
+}
+
+def _unified_symbol(text: str) -> str:
+    """统一全角/半角符号（参考 LDDC algorithm.py）"""
+    text = text.strip()
+    for k, v in _SYMBOL_MAP.items():
+        text = text.replace(k, v)
+    return re.sub(r'\s', ' ', text)
+
+def _text_difference(text1: str, text2: str) -> float:
+    """计算两段文本的相似度 0~1（参考 LDDC algorithm.py）"""
+    if text1 == text2:
+        return 1.0
+    return SequenceMatcher(lambda x: x == ' ', text1, text2).ratio()
+
+def _calculate_title_score(title1: str, title2: str) -> float:
+    """计算标题匹配得分 0~100（简化版 LDDC calculate_title_score）"""
+    t1 = _unified_symbol(title1).lower()
+    t2 = _unified_symbol(title2).lower()
+    if t1 == t2:
+        return 100.0
+    # 基础相似度
+    base_score = max(_text_difference(t1, t2), 0) * 100
+    # 找共同前缀
+    same_begin = ""
+    for i, c in enumerate(t1):
+        if len(t2) > i and c == t2[i]:
+            same_begin += c
+        else:
+            break
+    if not same_begin or same_begin in (t1, t2):
+        return base_score
+    # 前缀越长，分数越高
+    rest1 = t1[len(same_begin):]
+    rest2 = t2[len(same_begin):]
+    kp = len(same_begin) / ((len(rest1) + len(rest2)) / 2 + len(same_begin))
+    prefix_score = 100 * kp + max(_text_difference(rest1, rest2), 0) * (1 - kp)
+    return max(base_score, prefix_score)
+
+def _calculate_artist_score(artist1: str, artist2: str) -> float:
+    """计算艺术家匹配得分 0~100（简化版 LDDC calculate_artist_score）"""
+    a1 = _unified_symbol(artist1).lower()
+    a2 = _unified_symbol(artist2).lower()
+    if a1 == a2:
+        return 100.0
+    # 尝试按分隔符拆分
+    sep_pattern = re.compile(r'[,、/\\&]')
+    list1 = [s.strip() for s in sep_pattern.split(a1) if s.strip()]
+    list2 = [s.strip() for s in sep_pattern.split(a2) if s.strip()]
+    if not list1:
+        list1 = [a1]
+    if not list2:
+        list2 = [a2]
+    # 计算最佳匹配得分
+    scores = [_text_difference(x, y) for x in list1 for y in list2]
+    if not scores:
+        return 0.0
+    # 贪心匹配
+    all_pairs = [(i, j, _text_difference(list1[i], list2[j]))
+                 for i in range(len(list1)) for j in range(len(list2))]
+    all_pairs.sort(key=lambda x: x[2], reverse=True)
+    used_i, used_j = set(), set()
+    total = 0.0
+    for i, j, s in all_pairs:
+        if i not in used_i and j not in used_j:
+            used_i.add(i)
+            used_j.add(j)
+            total += s
+    return max(total / max(len(list1), len(list2)) * 100, 0)
+
+def _auto_fetch_lyrics(title: str, artist: str, duration: float) -> dict:
+    """自动从 lrclib.net 获取歌词（参考 LDDC lrclib.py + auto_fetch.py）
+
+    返回: {"success": bool, "lrc_text": str, "method": str, "match_score": float, "track_info": dict}
     """
-    from difflib import SequenceMatcher
-    n = len(whisper_segments)
-    normalized = [_normalize_lyrics(ws["text"]) for ws in whisper_segments]
+    result = {"success": False, "lrc_text": "", "method": "", "match_score": 0, "track_info": {}}
 
-    repeat_count = [0] * n
-    for i in range(n):
-        for j in range(i + 1, n):
-            if not normalized[i] or not normalized[j]:
+    if not title:
+        return result
+
+    try:
+        client = httpx.Client(
+            headers={
+                "User-Agent": "YouDooSing/1.0",
+                "Accept": "application/json",
+            },
+            timeout=15,
+        )
+
+        # 策略1：精确匹配（title + artist + duration）—— 参考 LDDC lrclib.get_lyrics
+        if artist and duration > 0:
+            try:
+                params = {
+                    "track_name": title,
+                    "artist_name": artist,
+                    "duration": int(duration),
+                }
+                resp = client.get("https://lrclib.net/api/get", params=params)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("syncedLyrics"):
+                        result["success"] = True
+                        result["lrc_text"] = data["syncedLyrics"]
+                        result["method"] = "lrclib精确匹配"
+                        result["match_score"] = 100
+                        result["track_info"] = {
+                            "title": data.get("trackName", ""),
+                            "artist": data.get("artistName", ""),
+                            "album": data.get("albumName", ""),
+                        }
+                        client.close()
+                        return result
+            except Exception as e:
+                print(f"[auto-lyrics] lrclib exact match failed: {e}")
+
+        # 策略2：搜索匹配 —— 参考 LDDC auto_fetch.py 的搜索+评分流程
+        keywords = []
+        if artist:
+            keywords.append(f"{artist} {title}")
+        keywords.append(title)
+
+        best_score = 0
+        best_data = None
+
+        for keyword in keywords:
+            try:
+                resp = client.get("https://lrclib.net/api/search", params={"q": keyword})
+                if resp.status_code != 200:
+                    continue
+                items = resp.json()
+                if not isinstance(items, list):
+                    continue
+
+                for item in items[:20]:  # 最多检查20个结果
+                    item_title = item.get("trackName", "")
+                    item_artist = item.get("artistName", "")
+                    item_duration = item.get("duration", 0)
+
+                    # 跳过没有同步歌词的结果
+                    if not item.get("syncedLyrics"):
+                        continue
+
+                    # 时长检查（参考 LDDC：相差超过4秒则跳过）
+                    if duration > 0 and item_duration > 0:
+                        if abs(duration - item_duration) > 4:
+                            continue
+
+                    # 计算匹配得分（参考 LDDC auto_fetch.search_callback）
+                    title_score = _calculate_title_score(title, item_title)
+                    artist_score = _calculate_artist_score(artist, item_artist) if artist and item_artist else None
+
+                    if artist_score is not None:
+                        score = title_score * 0.5 + artist_score * 0.5
+                    else:
+                        score = title_score
+
+                    # 标题得分太低时惩罚（参考 LDDC）
+                    if title_score < 30:
+                        score = max(0, score - 35)
+
+                    if score > best_score:
+                        best_score = score
+                        best_data = item
+
+            except Exception as e:
+                print(f"[auto-lyrics] lrclib search '{keyword}' failed: {e}")
                 continue
-            if len(normalized[i]) < 4 or len(normalized[j]) < 4:
-                sim = 1.0 if normalized[i] == normalized[j] else 0.0
-            else:
-                sim = SequenceMatcher(None, normalized[i], normalized[j]).ratio()
-            if sim > 0.6:
-                repeat_count[i] += 1
-                repeat_count[j] += 1
 
-    chorus_indices = set()
-    for i, cnt in enumerate(repeat_count):
-        if cnt >= 1:
-            chorus_indices.add(i)
+        # 最低匹配阈值 55 分（参考 LDDC auto_fetch 的 min_score=55）
+        if best_data and best_score >= 55:
+            result["success"] = True
+            result["lrc_text"] = best_data["syncedLyrics"]
+            result["method"] = "lrclib搜索匹配"
+            result["match_score"] = round(best_score, 1)
+            result["track_info"] = {
+                "title": best_data.get("trackName", ""),
+                "artist": best_data.get("artistName", ""),
+                "album": best_data.get("albumName", ""),
+            }
+        elif best_data:
+            result["match_score"] = round(best_score, 1)
+            result["track_info"] = {
+                "title": best_data.get("trackName", ""),
+                "artist": best_data.get("artistName", ""),
+            }
+            print(f"[auto-lyrics] best match score {best_score:.1f} < 55, skipped: {best_data.get('trackName')}")
 
-    if chorus_indices and n > 3:
-        expanded = set(chorus_indices)
-        for i in range(1, n - 1):
-            if i not in expanded and (i - 1) in expanded and (i + 1) in expanded:
-                expanded.add(i)
-        chorus_indices = expanded
+        client.close()
 
-    return chorus_indices
+    except Exception as e:
+        print(f"[auto-lyrics] error: {e}")
+        traceback.print_exc()
+
+    return result
 
 
 def _estimate_difficulty(text: str, start: float, end: float, is_chorus: bool) -> str:
-    """估算唱段难度（规则方式，作为 GPT 分析的备用）"""
+    """估算唱段难度（规则方式，AI 不可用时的备用）"""
     dur = max(end - start, 0.5)
     chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
     english_words = len(re.findall(r'[a-zA-Z]+', text))
@@ -306,188 +555,56 @@ def _estimate_difficulty(text: str, start: float, end: float, is_chorus: bool) -
         return "easy"
 
 
-def _gpt_analyze_lyrics(whisper_segments: list) -> dict:
-    """用 GPT 分析歌词，智能识别副歌段落和难度评估
-    返回: {"chorus": [索引列表], "difficulty": {"0": "easy", "1": "normal", ...}} 或 None
+def _split_and_analyze(song_id: str, filepath: str, duration: float, full_lyrics: str = "",
+                       title: str = "", artist: str = "") -> tuple:
+    """歌曲切分主流程：
+    1. librosa 静音检测切分时间段
+    2. 如果提供了歌词，用 AI 智能分配歌词 + 识别副歌 + 评估难度
+    3. 如果没有歌词，自动从 lrclib.net 搜索获取 LRC 歌词
+    返回 (segments_list, has_lyrics: bool)
     """
-    if not OPENAI_API_KEY:
-        return None
-
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
-
-        lyrics_list = []
-        for i, ws in enumerate(whisper_segments):
-            dur = round(ws["end"] - ws["start"], 1)
-            lyrics_list.append(f"[{i}] ({dur}s) {ws['text'].strip()}")
-        lyrics_text = "\n".join(lyrics_list)
-
-        prompt = f"""分析以下歌曲的歌词片段，完成两个任务：
-
-1. **副歌识别**：找出属于副歌（chorus/hook）的片段索引。副歌通常是歌曲中重复出现、旋律高亢、情感最强烈的部分。
-2. **难度评估**：为每个片段评估演唱难度（easy/normal/hard）。考虑因素：
-   - 歌词密度（字数多且时间短=难）
-   - 是否副歌（副歌通常需要更强的表现力）
-   - 音域跨度暗示（根据歌词内容推测）
-   - 节奏复杂度
-
-歌词片段：
-{lyrics_text}
-
-请严格按以下 JSON 格式回复，不要包含任何其他文字：
-{{"chorus": [副歌片段的索引号], "difficulty": {{"0": "easy", "1": "normal", ...}}}}"""
-
-        print(f"[gpt] analyzing {len(whisper_segments)} segments...")
-        response = client.chat.completions.create(
-            model=OPENAI_CHAT_MODEL,
-            messages=[
-                {"role": "system", "content": "你是一位专业的音乐分析师，擅长分析歌曲结构。只返回JSON，不要其他内容。"},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=1000,
-        )
-
-        content = response.choices[0].message.content.strip()
-        # 提取 JSON（兼容 markdown code block）
-        if "```" in content:
-            content = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
-            content = content.group(1) if content else ""
-        result = json.loads(content)
-
-        chorus = result.get("chorus", [])
-        difficulty = result.get("difficulty", {})
-        print(f"[gpt] analysis done: chorus={chorus}, difficulty_counts={{}}")
-        # 统计难度分布
-        diff_counts = {}
-        for d in difficulty.values():
-            diff_counts[d] = diff_counts.get(d, 0) + 1
-        print(f"[gpt] difficulty distribution: {diff_counts}")
-
-        return {"chorus": set(int(x) for x in chorus), "difficulty": {str(k): v for k, v in difficulty.items()}}
-    except Exception as e:
-        print(f"[gpt] lyrics analysis failed: {e}")
-        traceback.print_exc()
-        return None
-
-
-def _ai_split_segments(song_id: str, filepath: str, duration: float) -> tuple:
-    """AI 歌词识别切分 + 智能标注合唱和难度
-    流程: Whisper API 识别歌词 → GPT 分析副歌/难度 → 构建唱段
-    返回 (segments_list, ai_split_success)
-    """
-    whisper_result = _whisper_transcribe(filepath)
-    if not whisper_result:
-        print(f"[ai_split] whisper failed for song {song_id}, trying fallback silence split")
-        return _fallback_split_segments(song_id, filepath, duration)
-
-    # 用 GPT 分析副歌和难度
-    gpt_result = _gpt_analyze_lyrics(whisper_result)
-
-    # 如果 GPT 分析成功，使用 GPT 结果；否则回退到规则方式
-    if gpt_result:
-        chorus_indices = gpt_result["chorus"]
-        gpt_difficulty = gpt_result["difficulty"]
-        print(f"[ai_split] using GPT analysis: {len(chorus_indices)} chorus segments")
-    else:
-        chorus_indices = _detect_chorus_segments(whisper_result)
-        gpt_difficulty = None
-        print(f"[ai_split] GPT unavailable, using rule-based: {len(chorus_indices)} chorus segments")
-
-    # 构建唱段
-    segments = []
-    for i, ws in enumerate(whisper_result):
-        seg_id = f"{song_id}-{i+1:02d}"
-        while seg_id in SEGMENTS_DB:
-            seg_id = f"{song_id}-{uuid.uuid4().hex[:4]}"
-        lyrics = ws["text"].strip()
-        is_chorus = i in chorus_indices
-        end_time = min(ws["end"], duration)
-
-        # 优先使用 GPT 难度评估，否则用规则
-        if gpt_difficulty and str(i) in gpt_difficulty:
-            difficulty = gpt_difficulty[str(i)]
-            if difficulty not in ("easy", "normal", "hard"):
-                difficulty = _estimate_difficulty(lyrics, ws["start"], end_time, is_chorus)
-        else:
-            difficulty = _estimate_difficulty(lyrics, ws["start"], end_time, is_chorus)
-
-        seg = {
-            "id": seg_id,
-            "song_id": song_id,
-            "index": i + 1,
-            "start_time": ws["start"],
-            "end_time": end_time,
-            "lyrics": lyrics,
-            "difficulty": difficulty,
-            "is_chorus": is_chorus,
-            "status": "unassigned",
-            "claim_count": 0,
-            "submit_count": 0,
-            "claims": [],
-        }
-        SEGMENTS_DB[seg_id] = seg
-        segments.append(seg)
-
-    diff_stats = {}
-    for s in segments:
-        diff_stats[s["difficulty"]] = diff_stats.get(s["difficulty"], 0) + 1
-    chorus_count = sum(1 for s in segments if s["is_chorus"])
-    print(f"[ai_split] song {song_id}: {len(segments)} segments, chorus={chorus_count}, difficulty={diff_stats}")
-    return segments, True
-
-
-def _fallback_split_segments(song_id: str, filepath: str, duration: float) -> tuple:
-    """备用切分方案：基于静音检测或等时长切分
-    当 Whisper 不可用时自动使用此方案
-    """
+    # ---- 第一步：静音检测切分 ----
     split_points = [0.0]
 
-    # 方案1: 使用 librosa 静音检测
     try:
         import librosa
         import numpy as np
         y, sr = librosa.load(filepath, sr=22050, mono=True)
-        # 检测非静音区间
         intervals = librosa.effects.split(y, top_db=30, frame_length=2048, hop_length=512)
         if len(intervals) > 1:
-            # 将静音间隙位置作为切分点
             for i in range(len(intervals) - 1):
                 gap_start = intervals[i][1] / sr
                 gap_end = intervals[i + 1][0] / sr
                 gap_mid = (gap_start + gap_end) / 2.0
-                # 只在间隙足够大时切分（>0.3秒）
                 if gap_end - gap_start >= 0.3:
                     split_points.append(round(gap_mid, 2))
             split_points.append(round(duration, 2))
-            print(f"[fallback] librosa silence split: {len(split_points)-1} segments")
+            print(f"[split] librosa silence split: {len(split_points)-1} segments")
         else:
-            split_points = None  # 没检测到有效间隙，用等时长切分
+            split_points = None
     except Exception as e:
-        print(f"[fallback] librosa split failed: {e}")
+        print(f"[split] librosa split failed: {e}")
         split_points = None
 
-    # 方案2: 等时长切分（每段约10秒）
+    # 备用：等时长切分
     if not split_points or len(split_points) < 3:
-        seg_dur = 10.0  # 默认每段10秒
+        seg_dur = 10.0
         count = max(2, int(duration / seg_dur))
         seg_dur = duration / count
         split_points = [round(i * seg_dur, 2) for i in range(count + 1)]
-        print(f"[fallback] equal-time split: {count} segments, ~{seg_dur:.1f}s each")
+        print(f"[split] equal-time split: {count} segments, ~{seg_dur:.1f}s each")
 
     # 合并过短的段（<3秒）
     merged = [split_points[0]]
     for p in split_points[1:]:
         if p - merged[-1] < 3.0 and p != split_points[-1]:
-            continue  # 跳过，与前一段合并
+            continue
         merged.append(p)
-    # 确保最后一个点是 duration
     if merged[-1] < duration - 0.5:
         merged.append(round(duration, 2))
     split_points = merged
 
-    # 构建唱段
+    # ---- 第二步：构建唱段 ----
     segments = []
     for i in range(len(split_points) - 1):
         seg_id = f"{song_id}-{i+1:02d}"
@@ -502,18 +619,65 @@ def _fallback_split_segments(song_id: str, filepath: str, duration: float) -> tu
             "start_time": start_t,
             "end_time": end_t,
             "lyrics": "",
-            "difficulty": "medium",
+            "difficulty": "normal",
             "is_chorus": False,
             "status": "unassigned",
             "claim_count": 0,
             "submit_count": 0,
             "claims": [],
         }
-        SEGMENTS_DB[seg_id] = seg
         segments.append(seg)
 
-    print(f"[fallback] song {song_id}: created {len(segments)} segments (fallback mode)")
-    return segments, False
+    print(f"[split] {len(segments)} segments created")
+
+    # ---- 第三步：歌词分配 ----
+    has_lyrics = False
+    auto_fetched = False
+    if full_lyrics and full_lyrics.strip():
+        if _is_lrc_format(full_lyrics):
+            # LRC 格式：精确时间标记，直接解析分配
+            lrc_lines = _parse_lrc(full_lyrics)
+            if lrc_lines:
+                segments = _assign_lrc_to_segments(segments, lrc_lines)
+                has_lyrics = any(s["lyrics"] for s in segments)
+                if has_lyrics:
+                    print(f"[split] LRC lyrics assigned ({len(lrc_lines)} lines parsed)")
+        if not has_lyrics:
+            # 纯文本歌词：用 AI 智能分配
+            segments = _ai_assign_lyrics(segments, full_lyrics)
+            has_lyrics = any(s["lyrics"] for s in segments)
+            if not has_lyrics:
+                print("[split] AI lyrics assignment produced no results, falling back to rule-based")
+
+    # 如果没有歌词，自动从 lrclib.net 获取
+    if not has_lyrics and title:
+        print(f"[split] no lyrics provided, trying auto-fetch for '{title}' by '{artist}'...")
+        fetch_result = _auto_fetch_lyrics(title, artist, duration)
+        if fetch_result["success"] and fetch_result["lrc_text"]:
+            lrc_lines = _parse_lrc(fetch_result["lrc_text"])
+            if lrc_lines:
+                segments = _assign_lrc_to_segments(segments, lrc_lines)
+                has_lyrics = any(s["lyrics"] for s in segments)
+                if has_lyrics:
+                    auto_fetched = True
+                    print(f"[split] auto-fetched lyrics via {fetch_result['method']} "
+                          f"(score={fetch_result['match_score']}, {len(lrc_lines)} lines)")
+        if not has_lyrics:
+            print(f"[split] auto-fetch failed or no match (score={fetch_result.get('match_score', 0)})")
+
+    # 如果 AI 没分配歌词，用规则估算难度
+    if not has_lyrics:
+        for seg in segments:
+            seg["difficulty"] = _estimate_difficulty("", seg["start_time"], seg["end_time"], False)
+
+    # 注册到数据库
+    for seg in segments:
+        SEGMENTS_DB[seg["id"]] = seg
+
+    return segments, has_lyrics
+
+
+
 
 
 # ============ 初始化数据：从文件加载 ============
@@ -895,9 +1059,10 @@ async def admin_upload_song(
     request: Request,
     title: str = Form(...),
     artist: str = Form(""),
+    lyrics: str = Form(""),
     audio: UploadFile = File(...),
 ):
-    """上传新歌曲：保存音频文件 → 读取时长 → 自动切分唱段"""
+    """上传新歌曲：保存音频文件 → 读取时长 → 静音检测切分 → AI歌词分配"""
     verify_admin(request)
 
     # 检查文件类型
@@ -923,8 +1088,9 @@ async def admin_upload_song(
 
     audio_url = f"/api/uploads/{safe_filename}"
 
-    # AI 歌词识别切分
-    segments, ai_split = _ai_split_segments(song_id, filepath, duration)
+    # 静音检测切分 + 歌词分配（含自动获取）
+    segments, has_lyrics = _split_and_analyze(song_id, filepath, duration, lyrics,
+                                              title=title.strip(), artist=artist.strip())
 
     song = {
         "id": song_id,
@@ -938,13 +1104,13 @@ async def admin_upload_song(
         "participant_count": 0,
         "completion": 0.0,
         "segments": segments,
-        "ai_split": ai_split,
+        "has_lyrics": has_lyrics,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     SONGS_DB[song_id] = song
     _save_db()
 
-    print(f"[upload] new song: {title} ({artist}), duration={duration}s, {len(segments)} segments, ai_split={ai_split}")
+    print(f"[upload] new song: {title} ({artist}), duration={duration}s, {len(segments)} segments, has_lyrics={has_lyrics}")
     return {"success": True, "data": song}
 
 
@@ -970,6 +1136,8 @@ async def admin_get_songs(request: Request):
         # 检查伴奏文件是否存在
         acc_file = s.get("accompaniment_file", "")
         has_acc = bool(acc_file) and os.path.exists(os.path.join(UPLOAD_DIR, acc_file))
+        # 动态计算是否有歌词（兼容旧数据）
+        has_lyrics = s.get("has_lyrics", False) or any(seg.get("lyrics", "").strip() for seg in s.get("segments", []))
         songs.append({
             **s,
             "claimed_count": sum(1 for seg in s["segments"] if seg["status"] != "unassigned"),
@@ -977,6 +1145,7 @@ async def admin_get_songs(request: Request):
             "recording_count": sum(1 for r in RECORDINGS_DB.values() if r["song_id"] == s["id"]),
             "audio_file_exists": audio_exists,
             "has_accompaniment": has_acc,
+            "has_lyrics": has_lyrics,
         })
     return {"success": True, "data": songs}
 
@@ -1044,6 +1213,111 @@ async def admin_delete_song(song_id: str, request: Request):
             except: pass
     _save_db()
     return {"success": True, "message": "歌曲已删除"}
+
+
+@router.post("/admin/songs/{song_id}/lyrics")
+async def admin_upload_lyrics(song_id: str, request: Request):
+    """为已有歌曲上传歌词（支持 LRC 格式精确匹配或纯文本 AI 分配）"""
+    verify_admin(request)
+    song = SONGS_DB.get(song_id)
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲不存在")
+
+    body = await request.json()
+    full_lyrics = body.get("lyrics", "").strip()
+    if not full_lyrics:
+        raise HTTPException(status_code=400, detail="歌词内容不能为空")
+
+    segments = song["segments"]
+    is_lrc = _is_lrc_format(full_lyrics)
+
+    if is_lrc:
+        # LRC 格式：精确时间标记，直接解析分配
+        lrc_lines = _parse_lrc(full_lyrics)
+        if lrc_lines:
+            updated = _assign_lrc_to_segments(segments, lrc_lines)
+        else:
+            updated = segments
+    else:
+        # 纯文本歌词：用 AI 智能分配
+        updated = _ai_assign_lyrics(segments, full_lyrics)
+
+    has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
+    if not has_lyrics:
+        method = "LRC 解析" if is_lrc else "AI 歌词分配"
+        return {"success": False, "detail": f"{method}未成功，请检查歌词内容或格式"}
+
+    # 更新唱段和歌曲状态
+    song["segments"] = updated
+    song["has_lyrics"] = True
+    for seg in updated:
+        SEGMENTS_DB[seg["id"]] = seg
+    _save_db()
+
+    method = "LRC精确匹配" if is_lrc else "AI智能分配"
+    assigned = sum(1 for s in updated if s.get('lyrics'))
+    print(f"[lyrics] song {song_id}: {method}, lyrics assigned to {assigned} segments")
+    return {"success": True, "data": {"has_lyrics": True, "segment_count": len(updated), "method": method}}
+
+
+@router.post("/admin/songs/{song_id}/auto-lyrics")
+async def admin_auto_fetch_lyrics(song_id: str, request: Request):
+    """自动从 lrclib.net 获取歌词并分配到唱段（参考 LDDC 的搜索匹配算法）"""
+    verify_admin(request)
+    song = SONGS_DB.get(song_id)
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲不存在")
+
+    title = song.get("title", "")
+    artist = song.get("artist", "")
+    duration = song.get("duration", 0)
+
+    if not title:
+        raise HTTPException(status_code=400, detail="歌曲缺少标题信息，无法搜索歌词")
+
+    print(f"[auto-lyrics] manual trigger for '{title}' by '{artist}' ({duration}s)")
+    fetch_result = _auto_fetch_lyrics(title, artist, duration)
+
+    if not fetch_result["success"] or not fetch_result["lrc_text"]:
+        return {
+            "success": False,
+            "detail": f"未找到匹配的歌词（最高匹配分={fetch_result['match_score']}）",
+            "data": {"match_score": fetch_result["match_score"], "track_info": fetch_result.get("track_info", {})}
+        }
+
+    # 解析 LRC 并分配到唱段
+    lrc_lines = _parse_lrc(fetch_result["lrc_text"])
+    if not lrc_lines:
+        return {"success": False, "detail": "歌词解析失败"}
+
+    segments = song["segments"]
+    updated = _assign_lrc_to_segments(segments, lrc_lines)
+    has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
+
+    if not has_lyrics:
+        return {"success": False, "detail": "歌词已获取但无法匹配到任何唱段，可能时间戳不对应"}
+
+    # 更新数据库
+    song["segments"] = updated
+    song["has_lyrics"] = True
+    for seg in updated:
+        SEGMENTS_DB[seg["id"]] = seg
+    _save_db()
+
+    assigned = sum(1 for s in updated if s.get('lyrics'))
+    print(f"[auto-lyrics] success: {fetch_result['method']}, score={fetch_result['match_score']}, "
+          f"{assigned}/{len(updated)} segments assigned")
+    return {
+        "success": True,
+        "data": {
+            "has_lyrics": True,
+            "segment_count": len(updated),
+            "assigned_count": assigned,
+            "method": fetch_result["method"],
+            "match_score": fetch_result["match_score"],
+            "track_info": fetch_result["track_info"],
+        }
+    }
 
 
 # ============ 管理员 - 唱段管理 ============

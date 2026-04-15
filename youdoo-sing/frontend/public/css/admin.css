@@ -1395,6 +1395,31 @@ tbody tr:last-child td { border-bottom: none; }
     border-color: #dc2626;
     color: #b91c1c;
 }
+.song-card-acc .acc-lyrics-sep {
+    flex: 1;
+}
+.song-card-acc .lyrics-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: #2563eb;
+    font-weight: 500;
+}
+.song-card-acc .lyrics-upload-btn,
+.song-card-acc .lyrics-auto-btn {
+    font-size: 12px;
+    padding: 4px 10px;
+}
+.song-card-acc .lyrics-auto-btn {
+    color: #059669;
+    border-color: #a7f3d0;
+    background: #ecfdf5;
+}
+.song-card-acc .lyrics-auto-btn:hover {
+    background: #d1fae5;
+    border-color: #6ee7b7;
+}
 
 /* 音频文件丢失的歌曲卡片 */
 .song-card-missing {

@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt 2>/dev/null || \
     fastapi uvicorn python-multipart \
     sqlalchemy alembic psycopg2-binary \
     pydantic pydantic-settings python-dotenv \
-    librosa soundfile mutagen scipy numpy openai
+    librosa soundfile mutagen scipy numpy openai httpx
 
 # 复制后端代码
 COPY backend/ /app/backend/
