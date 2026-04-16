@@ -35,6 +35,7 @@
     let isRecording = false;
     let _micStream = null;
     let _recPreparing = false;
+    let _hasAcc = false;  // 当前歌曲是否有伴奏音频
 
     // ===== 升降调控制 =====
     const pitchLabel = document.getElementById('pitchLabel');
@@ -81,13 +82,73 @@
             const globalIdx = displayStart + i;
             let cls = 'lyric-line';
             if (seg.id === segment.id) cls += ' my-singing-line';
-            return `<div class="${cls}" data-seg-id="${seg.id}" data-global-idx="${globalIdx}">${seg.lyrics || '♪ ♪ ♪'}</div>`;
+            const text = seg.lyrics || '♪ ♪ ♪';
+            // 将多行歌词拆分为独立的 span，避免多行同时扫描
+            const lines = text.split(/\r?\n/).filter(l => l.trim());
+            if (lines.length > 1) {
+                const spans = lines.map(l => `<span class="lyric-sub-line">${l}</span>`).join('');
+                return `<div class="${cls}" data-seg-id="${seg.id}" data-global-idx="${globalIdx}" data-sub-lines="${lines.length}">${spans}</div>`;
+            }
+            return `<div class="${cls}" data-seg-id="${seg.id}" data-global-idx="${globalIdx}">${text}</div>`;
         }).join('');
+
+        // 后处理：检测 CSS 自动换行，将过长文本拆为 lyric-sub-line
+        _splitWrappedLines(lyricsSection);
 
         setTimeout(() => {
             const myLine = lyricsSection.querySelector('.my-singing-line');
             if (myLine) myLine.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 300);
+    }
+
+    /**
+     * 检测没有 lyric-sub-line 的 lyric-line 是否因 CSS 自动换行而占据多行，
+     * 如果是则按视觉行拆分为 <span class="lyric-sub-line">，复用已有多行扫描逻辑。
+     */
+    function _splitWrappedLines(container) {
+        container.querySelectorAll('.lyric-line').forEach(div => {
+            if (div.querySelectorAll('.lyric-sub-line').length > 0) return;
+            const text = div.textContent || '';
+            if (!text.trim()) return;
+
+            // 用 line-height 计算单行高度
+            const style = getComputedStyle(div);
+            const lineH = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) * 1.2);
+            const contentH = div.scrollHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+            const visualLines = Math.round(contentH / lineH);
+            if (visualLines <= 1) return;
+
+            // 用临时 span 逐字符测量，找出每行的断点
+            const chars = [...text];
+            // 先把文本放入 span 以便测量
+            div.innerHTML = chars.map(c => `<span class="_measure">${c}</span>`).join('');
+            const spans = div.querySelectorAll('._measure');
+            const breakIndices = [0]; // 每行起始字符索引
+            let prevTop = null;
+            spans.forEach((sp, i) => {
+                const top = sp.getBoundingClientRect().top;
+                if (prevTop !== null && Math.abs(top - prevTop) > lineH * 0.3) {
+                    breakIndices.push(i);
+                }
+                prevTop = top;
+            });
+
+            if (breakIndices.length <= 1) {
+                // 没有检测到换行，恢复原文本
+                div.textContent = text;
+                return;
+            }
+
+            // 按断点拆分为 lyric-sub-line
+            const lineTexts = [];
+            for (let k = 0; k < breakIndices.length; k++) {
+                const start = breakIndices[k];
+                const end = k + 1 < breakIndices.length ? breakIndices[k + 1] : chars.length;
+                lineTexts.push(chars.slice(start, end).join(''));
+            }
+            div.innerHTML = lineTexts.map(l => `<span class="lyric-sub-line">${l}</span>`).join('');
+            div.dataset.subLines = lineTexts.length;
+        });
     }
 
     // 返回
@@ -154,15 +215,40 @@
     });
 
     function _applyMtvScan(line, progress, isMySeg) {
-        const pct = (progress * 100).toFixed(1);
         const hiColor = isMySeg ? '#fbbf24' : 'rgba(255,255,255,0.85)';
         const loColor = isMySeg ? 'rgba(251,191,36,0.3)' : 'rgba(255,255,255,0.2)';
-        // 先设透明文字色，防止 .active 颜色闪烁
-        line.style.webkitTextFillColor = 'transparent';
-        line.style.background = `linear-gradient(90deg, ${hiColor} ${pct}%, ${loColor} ${pct}%)`;
-        line.style.webkitBackgroundClip = 'text';
-        line.style.backgroundClip = 'text';
-        line.classList.add('mtv-scan');
+
+        const subLines = line.querySelectorAll('.lyric-sub-line');
+        if (subLines.length > 1) {
+            // 多行歌词：逐行扫描，每行分配等比进度
+            const n = subLines.length;
+            subLines.forEach((sl, idx) => {
+                const lineStart = idx / n;
+                const lineEnd = (idx + 1) / n;
+                let lineProg;
+                if (progress >= lineEnd) {
+                    lineProg = 1;
+                } else if (progress <= lineStart) {
+                    lineProg = 0;
+                } else {
+                    lineProg = (progress - lineStart) / (lineEnd - lineStart);
+                }
+                const pct = (lineProg * 100).toFixed(1);
+                sl.style.webkitTextFillColor = 'transparent';
+                sl.style.background = `linear-gradient(90deg, ${hiColor} ${pct}%, ${loColor} ${pct}%)`;
+                sl.style.webkitBackgroundClip = 'text';
+                sl.style.backgroundClip = 'text';
+            });
+            line.classList.add('mtv-scan');
+        } else {
+            // 单行歌词：直接对整个 div 应用扫描
+            const pct = (progress * 100).toFixed(1);
+            line.style.webkitTextFillColor = 'transparent';
+            line.style.background = `linear-gradient(90deg, ${hiColor} ${pct}%, ${loColor} ${pct}%)`;
+            line.style.webkitBackgroundClip = 'text';
+            line.style.backgroundClip = 'text';
+            line.classList.add('mtv-scan');
+        }
     }
 
     function _clearMtvScan(line) {
@@ -171,6 +257,13 @@
         line.style.webkitBackgroundClip = '';
         line.style.backgroundClip = '';
         line.style.webkitTextFillColor = '';
+        // 清除子行的扫描样式
+        line.querySelectorAll('.lyric-sub-line').forEach(sl => {
+            sl.style.background = '';
+            sl.style.webkitBackgroundClip = '';
+            sl.style.backgroundClip = '';
+            sl.style.webkitTextFillColor = '';
+        });
     }
 
     function highlightLyrics(currentTime) {
@@ -209,7 +302,14 @@
     }
 
     // ===== 录音 =====
+    let _recCancelled = false;  // 标记录音流程是否被取消
+    let _stopping = false;      // 标记正在执行停止流程，防止重入和误启动
+    let _recSessionId = 0;      // 每次录音流程的唯一标识，用于防止旧流程继续执行
+    let _autoStopTimer = null;  // 安全兜底定时器
+
     btnRecord.addEventListener('click', async () => {
+        console.log('[录音按钮] 点击, isRecording=', isRecording, '_recPreparing=', _recPreparing, '_stopping=', _stopping);
+
         if (isAuditioning) {
             AudioManager.stop();
             isAuditioning = false;
@@ -217,8 +317,16 @@
             btnAudition.textContent = '▶ 播放试唱';
         }
 
+        // 正在停止流程中，忽略点击
+        if (_stopping) {
+            console.log('[录音按钮] _stopping=true, 忽略点击');
+            return;
+        }
+
         // 正在录音或准备中 → 停止
         if (isRecording || _recPreparing) {
+            console.log('[录音按钮] 触发停止, isRecording=', isRecording);
+            _recCancelled = true;
             stopRecording(isRecording ? false : true);
             return;
         }
@@ -227,6 +335,11 @@
             showToast('录音已满5条，请删除后再录');
             return;
         }
+
+        // 开始新的录音流程
+        const sessionId = ++_recSessionId;
+        _recCancelled = false;
+        console.log('[录音] 开始新流程, sessionId=', sessionId);
 
         // 0. 先获取麦克风权限（在播放音乐之前！避免异步延迟）
         try {
@@ -237,13 +350,20 @@
             _micStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     echoCancellation: false,
-                    noiseSuppression: false,
+                    noiseSuppression: true,
                     autoGainControl: true,
                 }
             });
         } catch (e) {
             showToast('无法访问麦克风，请授权后重试');
             console.error('[录音] 麦克风获取失败:', e);
+            return;
+        }
+
+        // 如果在 getUserMedia 期间被取消或有新流程，直接退出
+        if (_recCancelled || _stopping || sessionId !== _recSessionId) {
+            console.log('[录音] getUserMedia后检测到取消, sessionId=', sessionId, 'current=', _recSessionId);
+            releaseMic();
             return;
         }
 
@@ -269,29 +389,61 @@
         await sleep(1500);
         quietTip.style.display = 'none';
 
+        // 如果在 sleep 期间被取消（用户点了停止），直接退出并清理
+        if (_recCancelled || _stopping || sessionId !== _recSessionId) {
+            console.log('[录音] sleep后检测到取消, sessionId=', sessionId, 'current=', _recSessionId);
+            // 清理：stopRecording 可能已经清理过，但以防万一
+            if (!_stopping) {
+                stopLiveWave();
+                const wp = document.getElementById('liveWavePanel');
+                if (wp) { wp.style.display = 'none'; wp.classList.remove('is-recording'); }
+                _recPreparing = false;
+                btnRecord.className = 'btn-record-ctrl btn-record';
+                btnRecord.textContent = '🎤 录音';
+                btnAudition.disabled = false;
+                releaseMic();
+            }
+            return;
+        }
+
         // 3. 播放前奏 + 倒计时 + 录音
-        const audioUrl = `${API_BASE.replace('/api', '')}${song.audio_url}`;
-        // 计算播放起始点：从前一段歌词开始，但最多提前5秒
-        const prevSegIdx = Math.max(0, mySegIdx - 1);
-        const prevSegStart = allSegments[prevSegIdx].start_time;
-        const gapToPrev = segment.start_time - prevSegStart;
-        // 统一逻辑：如果是第一段、前段距离<1秒、或前段距离>5秒，都从5秒前开始
-        const maxLeadIn = 5;
+        // 录音时优先使用伴奏（无人声），避免原唱被麦克风录入
+        const baseUrl = API_BASE.replace('/api', '');
+        _hasAcc = !!song.accompaniment_url;
+        const recAudioUrl = _hasAcc
+            ? `${baseUrl}${song.accompaniment_url}`
+            : `${baseUrl}${song.audio_url}`;
+        // 计算播放起始点：从前两句歌词开始
+        const leadSegs = 2;  // 提前播放的句数
+        const leadSegIdx = Math.max(0, mySegIdx - leadSegs);
+        const leadSegStart = allSegments[leadSegIdx].start_time;
+        const gapToLead = segment.start_time - leadSegStart;
+        // 如果前两句距离<1秒或>15秒（太远），则从3秒前开始
+        const maxLeadIn = 3;
         let playStart;
-        if (mySegIdx === 0 || gapToPrev < 1 || gapToPrev > maxLeadIn) {
+        if (mySegIdx === 0 || gapToLead < 1 || gapToLead > 15) {
             playStart = Math.max(0, segment.start_time - maxLeadIn);
         } else {
-            playStart = prevSegStart;
+            playStart = leadSegStart;
         }
         const leadTime = segment.start_time - playStart;
 
-        _stopHandled = false;
-        _recCompleted = false;
         showArrowIndicators();
 
         waveLabel.textContent = leadTime > 3 ? '前奏准备' : '请准备';
 
-        AudioManager.playRange(audioUrl, playStart, segment.end_time, () => {
+        // 设置安全兜底定时器：无论如何，到达 end_time 后一定停止
+        if (_autoStopTimer) clearTimeout(_autoStopTimer);
+        const maxDuration = (segment.end_time - playStart + 2) * 1000;  // 额外2秒容差
+        _autoStopTimer = setTimeout(() => {
+            console.log('[录音] 安全兜底定时器触发, isRecording=', isRecording, '_recPreparing=', _recPreparing);
+            if (isRecording || _recPreparing) {
+                stopRecording(false);
+            }
+        }, maxDuration);
+
+        AudioManager.playRange(recAudioUrl, playStart, segment.end_time, () => {
+            console.log('[录音] playRange onEnd 触发, isRecording=', isRecording, '_recPreparing=', _recPreparing, '_stopping=', _stopping);
             _stopSyncLoop();
             if (isRecording || _recPreparing) {
                 stopRecording(false);
@@ -300,6 +452,15 @@
         });
 
         _startSyncLoop((curTime) => {
+            // 安全边界：录音中且已超过唱段结束时间 → 强制停止
+            if (isRecording && curTime >= segment.end_time - 0.05) {
+                console.log('[录音] syncLoop安全边界触发, curTime=', curTime, 'endTime=', segment.end_time);
+                _stopSyncLoop();
+                stopRecording(false);
+                hideArrowIndicators();
+                return;
+            }
+
             if (isRecording && curTime >= segment.start_time) {
                 highlightRecordingLyrics(curTime);
             } else {
@@ -430,9 +591,9 @@
             mediaRecorder.start();
             isRecording = true;
 
-            // 降低背景音乐音量，但不要太低
+            // 降低背景音量：有伴奏时适度降低，无伴奏（原唱）时大幅降低以减少人声串入
             const audio = AudioManager.getCurrent();
-            if (audio) audio.volume = 0.15;
+            if (audio) audio.volume = _hasAcc ? 0.25 : 0.08;
 
         } catch (e) {
             console.error('[录音] MediaRecorder启动失败:', e);
@@ -441,16 +602,22 @@
         }
     }
 
-    let _stopHandled = false;
-    let _recCompleted = false;
-
     function stopRecording(discard) {
-        if (_stopHandled) return;
-        _stopHandled = true;
+        console.log('[stopRecording] 调用, discard=', discard, '_stopping=', _stopping, 'isRecording=', isRecording, '_recPreparing=', _recPreparing);
+        // 防止重入：如果已在停止流程中，直接返回
+        if (_stopping) {
+            console.log('[stopRecording] 已在停止流程中，忽略');
+            return;
+        }
+        _stopping = true;
+
+        // 清除安全兜底定时器
+        if (_autoStopTimer) { clearTimeout(_autoStopTimer); _autoStopTimer = null; }
 
         const wasRecording = isRecording;
         isRecording = false;
         _recPreparing = false;
+        _recCancelled = true;  // 确保 async click handler 中的 await 点也能感知到停止
         btnRecord.disabled = false;
         btnRecord.className = 'btn-record-ctrl btn-record';
         btnRecord.textContent = '🎤 录音';
@@ -469,20 +636,19 @@
 
         // Stop MediaRecorder
         if (wasRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
+            console.log('[stopRecording] 停止MediaRecorder, state=', mediaRecorder.state, 'discard=', discard);
             if (discard) {
-                _recCompleted = true;
                 mediaRecorder.ondataavailable = null;
                 mediaRecorder.onstop = () => {
-                    _stopHandled = false;
-                    _recCompleted = false;
+                    console.log('[stopRecording] MediaRecorder.onstop (discard)');
                     releaseMic();
+                    _stopping = false;
                 };
             } else {
                 mediaRecorder.onstop = () => {
+                    console.log('[stopRecording] MediaRecorder.onstop (save), chunks=', recordedChunks.length);
                     // 等一个微任务让最后的 ondataavailable 先执行
                     setTimeout(() => {
-                        if (_recCompleted) { _stopHandled = false; return; }
-                        _recCompleted = true;
                         const mimeType = mediaRecorder.mimeType || 'audio/webm;codecs=opus';
                         const blob = new Blob(recordedChunks, { type: mimeType });
                         if (recordedChunks.length > 0 && blob.size > 0) {
@@ -490,17 +656,17 @@
                         } else {
                             showToast('录音数据为空，请检查麦克风');
                         }
-                        _stopHandled = false;
-                        _recCompleted = false;
-                        setTimeout(releaseMic, 100);
+                        releaseMic();
+                        _stopping = false;
+                        console.log('[stopRecording] 完成, _stopping=false');
                     }, 50);
                 };
             }
             mediaRecorder.stop();
         } else {
-            _stopHandled = false;
-            _recCompleted = false;
+            console.log('[stopRecording] 无需停止MediaRecorder, wasRecording=', wasRecording);
             releaseMic();
+            _stopping = false;
         }
     }
 
@@ -528,32 +694,32 @@
 
         const source = _audioCtx.createMediaStreamSource(stream);
 
-        // 1. 高通滤波 — 去除 80Hz 以下低频噪声（空调、风扇、嗡嗡声）
+        // 1. 高通滤波 — 去除 100Hz 以下低频噪声（空调、风扇、嗡嗡声）
         const highpass = _audioCtx.createBiquadFilter();
         highpass.type = 'highpass';
-        highpass.frequency.value = 80;
+        highpass.frequency.value = 100;
         highpass.Q.value = 0.7;
 
-        // 2. 低通滤波 — 去除 12kHz 以上高频噪声（电流声、嘶嘶声）
+        // 2. 低通滤波 — 去除 14kHz 以上高频噪声（电流声、嘶嘶声）
         const lowpass = _audioCtx.createBiquadFilter();
         lowpass.type = 'lowpass';
-        lowpass.frequency.value = 12000;
+        lowpass.frequency.value = 14000;
         lowpass.Q.value = 0.7;
 
-        // 3. 动态压缩器 — 平衡音量，防止爆音，让声音更饱满
+        // 3. 动态压缩器 — 轻度压缩，保留动态范围，防止爆音
         const compressor = _audioCtx.createDynamicsCompressor();
-        compressor.threshold.value = -24;   // 压缩阈值
-        compressor.knee.value = 12;         // 柔和过渡
-        compressor.ratio.value = 4;         // 压缩比
-        compressor.attack.value = 0.003;    // 快速响应
-        compressor.release.value = 0.15;    // 适中释放
+        compressor.threshold.value = -18;   // 提高阈值，减少过度压缩
+        compressor.knee.value = 15;         // 柔和过渡
+        compressor.ratio.value = 2.5;       // 降低压缩比，保留自然动态
+        compressor.attack.value = 0.005;    // 稍慢响应，避免吃掉瞬态
+        compressor.release.value = 0.2;     // 适中释放
 
-        // 4. 中频提升 — 增强人声核心频段（2-4kHz），让声音更清晰
+        // 4. 中频提升 — 增强人声核心频段（2.5kHz），让声音更清晰
         const midBoost = _audioCtx.createBiquadFilter();
         midBoost.type = 'peaking';
-        midBoost.frequency.value = 3000;
-        midBoost.Q.value = 1.0;
-        midBoost.gain.value = 3;  // +3dB
+        midBoost.frequency.value = 2500;
+        midBoost.Q.value = 1.2;
+        midBoost.gain.value = 4;  // +4dB
 
         // 5. 临场感提升 — 轻微提升 5kHz，增加声音亮度
         const presenceBoost = _audioCtx.createBiquadFilter();
@@ -562,9 +728,9 @@
         presenceBoost.Q.value = 1.0;
         presenceBoost.gain.value = 2;  // +2dB
 
-        // 6. 增益补偿 — 补偿处理链的音量损失
+        // 6. 增益补偿 — 提高整体录音音量
         const makeupGain = _audioCtx.createGain();
-        makeupGain.gain.value = 1.3;
+        makeupGain.gain.value = 2.0;
 
         // 连接处理链
         source.connect(highpass);

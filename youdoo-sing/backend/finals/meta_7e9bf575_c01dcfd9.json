@@ -1,0 +1,225 @@
+{
+  "song_id": "7e9bf575",
+  "song_title": "世界赠予我的",
+  "song_artist": "王菲",
+  "duration": 244.28,
+  "segments": [
+    {
+      "id": "7e9bf575-137208",
+      "index": 1,
+      "start_time": 25.5,
+      "end_time": 49.1,
+      "lyrics": "有人放烟花  有人追晚风\n借一缕时光  捧一片星空\n停一停 等一等 别匆匆",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "90c60d3b",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/90c60d3b.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    },
+    {
+      "id": "7e9bf575-366b25",
+      "index": 2,
+      "start_time": 49.1,
+      "end_time": 62,
+      "lyrics": "造梦者造了好梦 值得我称颂",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "2ad567bd",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/2ad567bd.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    },
+    {
+      "id": "7e9bf575-014b3b",
+      "index": 3,
+      "start_time": 62,
+      "end_time": 71.4,
+      "lyrics": "世界赠予我虫鸣 也赠予我雷霆",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "a7490f3b",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/a7490f3b.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    },
+    {
+      "id": "7e9bf575-90432d",
+      "index": 4,
+      "start_time": 71.4,
+      "end_time": 79.6,
+      "lyrics": "赠我弯弯一枚月 也赠予我晚星",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "a7f8caae",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/a7f8caae.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    },
+    {
+      "id": "7e9bf575-ea1e99",
+      "index": 5,
+      "start_time": 79.6,
+      "end_time": 98.9,
+      "lyrics": "赠我一场病 又慢慢痊愈摇风铃\n赠我一场空 又渐渐填满真感情",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "3619164d",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/3619164d.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    },
+    {
+      "id": "7e9bf575-c217f8",
+      "index": 6,
+      "start_time": 114.3,
+      "end_time": 138.2,
+      "lyrics": "有人唱情歌 有人听晚钟\n借一丝懵懂 惊一片翻涌\n追一追 赶一赶 情正浓",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "51812e07",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/51812e07.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    },
+    {
+      "id": "7e9bf575-d4c29c",
+      "index": 7,
+      "start_time": 138.2,
+      "end_time": 147.3,
+      "lyrics": "好故事眷顾好人 天赐的恩宠",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "fc2aef82",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/fc2aef82.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    },
+    {
+      "id": "7e9bf575-209057",
+      "index": 8,
+      "start_time": 147.3,
+      "end_time": 156.5,
+      "lyrics": "世界赠予我拥有 也赠予我回敬",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "753929fb",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/753929fb.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    },
+    {
+      "id": "7e9bf575-1a666f",
+      "index": 9,
+      "start_time": 156.5,
+      "end_time": 164.9,
+      "lyrics": "赠我小小一扇窗 也赠予我屋顶",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "e5e58439",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/e5e58439.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    },
+    {
+      "id": "7e9bf575-f5a9af",
+      "index": 10,
+      "start_time": 164.9,
+      "end_time": 184.1,
+      "lyrics": "赠我一个名 又渐渐长大的年龄\n赠我一首诗 又悄悄读得很安静",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "01ffa39a",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/01ffa39a.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    },
+    {
+      "id": "7e9bf575-cb1935",
+      "index": 11,
+      "start_time": 184.1,
+      "end_time": 199.4,
+      "lyrics": "有人要回望 有人要憧憬 借一朵白云 拍一张合影",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "64f9886b",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/64f9886b.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    },
+    {
+      "id": "7e9bf575-a7da5d",
+      "index": 12,
+      "start_time": 199.4,
+      "end_time": 221.1,
+      "lyrics": "想一想问自己莫打听 远去者去了远方 愿他都安心",
+      "is_chorus": false,
+      "recordings": [
+        {
+          "id": "06748944",
+          "user_name": "微信用户3773",
+          "audio_url": "/api/uploads/06748944.webm",
+          "score": 3.0,
+          "pitch_shift": 0,
+          "reverb": 0
+        }
+      ]
+    }
+  ],
+  "created_at": "2026-04-17 02:17:51"
+}

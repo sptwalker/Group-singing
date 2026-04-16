@@ -225,6 +225,163 @@ def _assign_lrc_to_segments(segments: list, lrc_lines: list) -> list:
     return segments
 
 
+def _resegment_by_lrc(song_id: str, lrc_lines: list, total_duration: float,
+                      target_lines_per_seg: int = 4, max_lines_per_seg: int = 6) -> list:
+    """根据 LRC 时间戳重新生成唱段（当原始分段太粗时使用）
+
+    算法：
+    1. 计算行间隔的中位数，用于区分"正常行间隔"和"间奏/停顿"
+    2. 间隔 > 中位数 * 2.5 或 > 8秒 的位置视为自然分段点（间奏）
+    3. 连续行数达到 target_lines_per_seg 时，在最大间隔处切分
+    4. 每段不超过 max_lines_per_seg 行
+
+    返回新的 segments 列表（已含歌词、副歌标记、难度）
+    """
+    if not lrc_lines:
+        return []
+
+    # 过滤空歌词行，保留有文本的行
+    vocal_lines = [(t, text) for t, text in lrc_lines if text.strip()]
+    if not vocal_lines:
+        return []
+
+    # 计算行间隔统计信息，确定自然分段阈值
+    gaps = []
+    for i in range(1, len(vocal_lines)):
+        gaps.append(vocal_lines[i][0] - vocal_lines[i - 1][0])
+
+    if gaps:
+        sorted_gaps = sorted(gaps)
+        median_gap = sorted_gaps[len(sorted_gaps) // 2]
+        # 自然分段阈值：中位数的 2.5 倍，但至少 8 秒，最多 20 秒
+        natural_break_threshold = max(8.0, min(20.0, median_gap * 2.5))
+    else:
+        natural_break_threshold = 8.0
+
+    print(f"[resegment] {len(vocal_lines)} vocal lines, median_gap={median_gap:.1f}s, "
+          f"break_threshold={natural_break_threshold:.1f}s")
+
+    # 第一遍：按自然间隔切分成"段组"
+    groups = []  # 每个 group 是一组连续的行索引 [start_idx, end_idx)
+    group_start = 0
+    for i in range(1, len(vocal_lines)):
+        gap = vocal_lines[i][0] - vocal_lines[i - 1][0]
+        if gap >= natural_break_threshold:
+            groups.append((group_start, i))
+            group_start = i
+    groups.append((group_start, len(vocal_lines)))
+
+    # 第二遍：对每个段组，如果行数太多，按 target_lines_per_seg 进一步切分
+    final_groups = []
+    for g_start, g_end in groups:
+        n_lines = g_end - g_start
+        if n_lines <= max_lines_per_seg:
+            final_groups.append((g_start, g_end))
+        else:
+            # 需要进一步切分：每 target_lines_per_seg 行切一次，在最大间隔处切
+            pos = g_start
+            while pos < g_end:
+                remaining = g_end - pos
+                if remaining <= max_lines_per_seg:
+                    final_groups.append((pos, g_end))
+                    break
+
+                # 在 [pos + target_lines_per_seg - 1, pos + max_lines_per_seg] 范围内找最大间隔
+                search_start = pos + max(2, target_lines_per_seg - 1)
+                search_end = min(pos + max_lines_per_seg, g_end)
+                best_cut = search_start
+                best_gap = 0
+                for j in range(search_start, search_end + 1):
+                    if j >= len(vocal_lines):
+                        break
+                    g = vocal_lines[j][0] - vocal_lines[j - 1][0]
+                    if g >= best_gap:
+                        best_gap = g
+                        best_cut = j
+
+                final_groups.append((pos, best_cut))
+                pos = best_cut
+
+    # 构建唱段
+    segments = []
+    _seg_template = {
+        "song_id": song_id, "difficulty": "normal", "is_chorus": False,
+        "status": "unassigned", "claim_count": 0, "submit_count": 0, "claims": [],
+    }
+
+    for gi, (g_start, g_end) in enumerate(final_groups):
+        seg_start = vocal_lines[g_start][0]
+        # 段结束时间
+        if gi + 1 < len(final_groups):
+            seg_end = vocal_lines[final_groups[gi + 1][0]][0]
+        else:
+            last_t = vocal_lines[g_end - 1][0]
+            if g_end >= 2:
+                avg_dur = max(vocal_lines[g_end - 1][0] - vocal_lines[g_end - 2][0], 3.0)
+            else:
+                avg_dur = 5.0
+            seg_end = min(last_t + avg_dur, total_duration)
+
+        # 前奏段
+        if gi == 0 and seg_start > 2.0:
+            seg_id = f"{song_id}-{len(segments)+1:02d}"
+            segments.append({
+                **_seg_template, "id": seg_id, "index": len(segments) + 1,
+                "start_time": 0.0, "end_time": round(seg_start, 2),
+                "lyrics": "", "difficulty": "easy",
+            })
+
+        # 如果与上一个有歌词的段之间有大间隔（间奏），插入间奏段
+        if gi > 0:
+            prev_end = segments[-1]["end_time"] if segments else 0
+            if seg_start - prev_end > 3.0:
+                seg_id = f"{song_id}-{len(segments)+1:02d}"
+                segments.append({
+                    **_seg_template, "id": seg_id, "index": len(segments) + 1,
+                    "start_time": round(prev_end, 2), "end_time": round(seg_start, 2),
+                    "lyrics": "", "difficulty": "easy",
+                })
+
+        # 歌词段
+        seg_lyrics = [vocal_lines[idx][1] for idx in range(g_start, g_end) if vocal_lines[idx][1].strip()]
+        seg_id = f"{song_id}-{len(segments)+1:02d}"
+        segments.append({
+            **_seg_template, "id": seg_id, "index": len(segments) + 1,
+            "start_time": round(seg_start, 2), "end_time": round(seg_end, 2),
+            "lyrics": "\n".join(seg_lyrics),
+        })
+
+    # 尾奏段
+    if segments and total_duration - segments[-1]["end_time"] > 3.0:
+        seg_id = f"{song_id}-{len(segments)+1:02d}"
+        segments.append({
+            **_seg_template, "id": seg_id, "index": len(segments) + 1,
+            "start_time": segments[-1]["end_time"], "end_time": round(total_duration, 2),
+            "lyrics": "", "difficulty": "easy",
+        })
+
+    # 副歌检测
+    lyrics_list = [seg["lyrics"].strip() for seg in segments]
+    for i, seg in enumerate(segments):
+        text = lyrics_list[i]
+        if not text:
+            continue
+        repeat_count = sum(1 for j, other in enumerate(lyrics_list) if j != i and other == text)
+        if repeat_count >= 1:
+            seg["is_chorus"] = True
+
+    # 难度评估
+    for seg in segments:
+        seg["difficulty"] = _estimate_difficulty(
+            seg["lyrics"], seg["start_time"], seg["end_time"], seg.get("is_chorus", False)
+        )
+
+    assigned = sum(1 for s in segments if s["lyrics"].strip())
+    chorus = sum(1 for s in segments if s.get("is_chorus"))
+    print(f"[resegment] created {len(segments)} segments from LRC ({assigned} with lyrics, {chorus} chorus)")
+    return segments
+
+
 def _ai_assign_lyrics(segments: list, full_lyrics: str) -> list:
     """用 AI 将完整歌词智能分配到各唱段，同时识别副歌和评估难度
     segments: [{"index": 1, "start_time": 0.0, "end_time": 8.5, ...}, ...]
@@ -317,7 +474,7 @@ def _is_lrc_format(text: str) -> bool:
     return len(matches) >= 3
 
 
-# ============ 自动歌词获取（借鉴 LDDC 项目的匹配算法 + lrclib.net API） ============
+# ============ 自动歌词获取（借鉴 LDDC 项目的匹配算法 + 多源搜索） ============
 
 _SYMBOL_MAP = {
     "（": "(", "）": ")", "：": ":", "！": "!", "？": "?",
@@ -390,8 +547,37 @@ def _calculate_artist_score(artist1: str, artist2: str) -> float:
             total += s
     return max(total / max(len(list1), len(list2)) * 100, 0)
 
+def _clean_title(title: str) -> str:
+    """清理标题中的多余信息，提取核心歌曲名"""
+    t = title.strip()
+    # 移除常见后缀标记：(Live), (Remix), (翻唱), (Cover), (1), 版本号等
+    t = re.sub(r'\s*[\(（\[【](?:Live|Remix|Cover|Inst\.?|Instrumental|翻唱|伴奏|现场|Demo|Acoustic|Unplugged|Remaster(?:ed)?|\d+)[\)）\]】]', '', t, flags=re.IGNORECASE)
+    # 移除尾部的 (数字) 如 "(1)"
+    t = re.sub(r'\s*\(\d+\)\s*$', '', t)
+    return t.strip()
+
+
+def _clean_artist(artist: str) -> str:
+    """提取第一个/主要艺术家名"""
+    if not artist:
+        return ""
+    # 按常见分隔符拆分，取第一个
+    parts = re.split(r'[;；,，、/\\\&\+]', artist)
+    first = parts[0].strip() if parts else artist.strip()
+    # 移除括号内容
+    first = re.sub(r'[\(（].*?[\)）]', '', first).strip()
+    return first
+
+
 def _auto_fetch_lyrics(title: str, artist: str, duration: float) -> dict:
-    """自动从 lrclib.net 获取歌词（参考 LDDC lrclib.py + auto_fetch.py）
+    """自动从多个源获取歌词（lrclib.net + 网易云 + QQ音乐备用）
+
+    改进策略：
+    1. 清理标题（去除 Live/Remix/版本号等后缀）
+    2. 放宽时长容差（从4秒→30秒，分阶梯评分）
+    3. 多关键词搜索（原标题、清理后标题、仅标题、拼音等）
+    4. 降级接受 plainLyrics（无时间标记的纯文本歌词）
+    5. 备用源：网易云音乐 API
 
     返回: {"success": bool, "lrc_text": str, "method": str, "match_score": float, "track_info": dict}
     """
@@ -400,23 +586,27 @@ def _auto_fetch_lyrics(title: str, artist: str, duration: float) -> dict:
     if not title:
         return result
 
+    clean_t = _clean_title(title)
+    clean_a = _clean_artist(artist)
+
     try:
         client = httpx.Client(
             headers={
-                "User-Agent": "YouDooSing/1.0",
+                "User-Agent": "YouDooSing/1.0 (https://github.com/sptwalker/Group-singing)",
                 "Accept": "application/json",
             },
             timeout=15,
+            follow_redirects=True,
         )
 
-        # 策略1：精确匹配（title + artist + duration）—— 参考 LDDC lrclib.get_lyrics
-        if artist and duration > 0:
+        # ========== 策略1：lrclib 精确匹配 ==========
+        for try_title, try_artist in [(clean_t, clean_a), (title, artist), (clean_t, "")]:
+            if not try_title:
+                continue
             try:
-                params = {
-                    "track_name": title,
-                    "artist_name": artist,
-                    "duration": int(duration),
-                }
+                params = {"track_name": try_title, "artist_name": try_artist}
+                if duration > 0:
+                    params["duration"] = int(duration)
                 resp = client.get("https://lrclib.net/api/get", params=params)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -433,16 +623,25 @@ def _auto_fetch_lyrics(title: str, artist: str, duration: float) -> dict:
                         client.close()
                         return result
             except Exception as e:
-                print(f"[auto-lyrics] lrclib exact match failed: {e}")
+                print(f"[auto-lyrics] lrclib exact match failed ({try_title}/{try_artist}): {e}")
 
-        # 策略2：搜索匹配 —— 参考 LDDC auto_fetch.py 的搜索+评分流程
+        # ========== 策略2：lrclib 搜索匹配（多关键词 + 宽松时长） ==========
         keywords = []
-        if artist:
+        if clean_a and clean_a != clean_t:
+            keywords.append(f"{clean_a} {clean_t}")
+        if artist and artist != clean_a:
             keywords.append(f"{artist} {title}")
-        keywords.append(title)
+        keywords.append(clean_t)
+        if clean_t != title:
+            keywords.append(title)
+        # 去重保序
+        seen = set()
+        keywords = [k for k in keywords if k not in seen and not seen.add(k)]
 
         best_score = 0
         best_data = None
+        best_plain = None  # 备用：纯文本歌词
+        best_plain_score = 0
 
         for keyword in keywords:
             try:
@@ -453,43 +652,71 @@ def _auto_fetch_lyrics(title: str, artist: str, duration: float) -> dict:
                 if not isinstance(items, list):
                     continue
 
-                for item in items[:20]:  # 最多检查20个结果
+                for item in items[:30]:
                     item_title = item.get("trackName", "")
                     item_artist = item.get("artistName", "")
                     item_duration = item.get("duration", 0)
+                    has_synced = bool(item.get("syncedLyrics"))
+                    has_plain = bool(item.get("plainLyrics"))
 
-                    # 跳过没有同步歌词的结果
-                    if not item.get("syncedLyrics"):
+                    if not has_synced and not has_plain:
                         continue
 
-                    # 时长检查（参考 LDDC：相差超过4秒则跳过）
+                    # ---- 时长评分（阶梯式，不再硬过滤） ----
+                    duration_penalty = 0
                     if duration > 0 and item_duration > 0:
-                        if abs(duration - item_duration) > 4:
-                            continue
+                        diff = abs(duration - item_duration)
+                        if diff <= 5:
+                            duration_penalty = 0       # 完美匹配
+                        elif diff <= 15:
+                            duration_penalty = -5      # 轻微差异（不同版本）
+                        elif diff <= 30:
+                            duration_penalty = -15     # 较大差异（可能是不同编曲）
+                        elif diff <= 60:
+                            duration_penalty = -25     # 差异大但可能同一首歌
+                        else:
+                            duration_penalty = -40     # 差异很大，可能不是同一首
 
-                    # 计算匹配得分（参考 LDDC auto_fetch.search_callback）
-                    title_score = _calculate_title_score(title, item_title)
-                    artist_score = _calculate_artist_score(artist, item_artist) if artist and item_artist else None
+                    # ---- 标题评分 ----
+                    title_score = _calculate_title_score(clean_t, _clean_title(item_title))
+                    # 也用原始标题算一次，取高分
+                    title_score2 = _calculate_title_score(title, item_title)
+                    title_score = max(title_score, title_score2)
 
-                    if artist_score is not None:
-                        score = title_score * 0.5 + artist_score * 0.5
+                    # ---- 艺术家评分 ----
+                    if clean_a and item_artist:
+                        artist_score = _calculate_artist_score(clean_a, item_artist)
+                        # 也用原始 artist 算一次
+                        if artist:
+                            artist_score2 = _calculate_artist_score(artist, item_artist)
+                            artist_score = max(artist_score, artist_score2)
+                        score = title_score * 0.6 + artist_score * 0.4
                     else:
+                        # 没有艺术家信息时，标题权重更高
                         score = title_score
 
-                    # 标题得分太低时惩罚（参考 LDDC）
+                    score += duration_penalty
+
+                    # 标题得分太低时惩罚
                     if title_score < 30:
                         score = max(0, score - 35)
 
-                    if score > best_score:
+                    # 优先选有同步歌词的
+                    if has_synced and score > best_score:
                         best_score = score
                         best_data = item
+
+                    # 记录最佳纯文本歌词（降级用）
+                    if has_plain and score > best_plain_score:
+                        best_plain_score = score
+                        best_plain = item
 
             except Exception as e:
                 print(f"[auto-lyrics] lrclib search '{keyword}' failed: {e}")
                 continue
 
-        # 最低匹配阈值 55 分（参考 LDDC auto_fetch 的 min_score=55）
-        if best_data and best_score >= 55:
+        # 评估结果：同步歌词阈值 40 分（降低门槛），纯文本阈值 50 分
+        if best_data and best_score >= 40:
             result["success"] = True
             result["lrc_text"] = best_data["syncedLyrics"]
             result["method"] = "lrclib搜索匹配"
@@ -499,13 +726,48 @@ def _auto_fetch_lyrics(title: str, artist: str, duration: float) -> dict:
                 "artist": best_data.get("artistName", ""),
                 "album": best_data.get("albumName", ""),
             }
-        elif best_data:
+            client.close()
+            return result
+
+        # 降级：使用纯文本歌词（没有时间标记，但至少有歌词内容）
+        if best_plain and best_plain_score >= 50:
+            plain_text = best_plain.get("plainLyrics", "")
+            if plain_text and len(plain_text.strip()) > 20:
+                result["success"] = True
+                result["lrc_text"] = plain_text  # 纯文本，非 LRC 格式
+                result["method"] = "lrclib纯文本匹配"
+                result["match_score"] = round(best_plain_score, 1)
+                result["track_info"] = {
+                    "title": best_plain.get("trackName", ""),
+                    "artist": best_plain.get("artistName", ""),
+                    "album": best_plain.get("albumName", ""),
+                }
+                client.close()
+                return result
+
+        # ========== 策略3：网易云音乐搜索（中文歌曲覆盖率高） ==========
+        try:
+            ne_result = _fetch_lyrics_netease(clean_t, clean_a, duration, client)
+            if ne_result["success"]:
+                client.close()
+                return ne_result
+        except Exception as e:
+            print(f"[auto-lyrics] netease fallback failed: {e}")
+
+        # 记录最佳未达标结果
+        if best_data:
             result["match_score"] = round(best_score, 1)
             result["track_info"] = {
                 "title": best_data.get("trackName", ""),
                 "artist": best_data.get("artistName", ""),
             }
-            print(f"[auto-lyrics] best match score {best_score:.1f} < 55, skipped: {best_data.get('trackName')}")
+            print(f"[auto-lyrics] best lrclib score {best_score:.1f} < 40, skipped: {best_data.get('trackName')}")
+        elif best_plain:
+            result["match_score"] = round(best_plain_score, 1)
+            result["track_info"] = {
+                "title": best_plain.get("trackName", ""),
+                "artist": best_plain.get("artistName", ""),
+            }
 
         client.close()
 
@@ -514,6 +776,119 @@ def _auto_fetch_lyrics(title: str, artist: str, duration: float) -> dict:
         traceback.print_exc()
 
     return result
+
+
+def _fetch_lyrics_netease(title: str, artist: str, duration: float, client: httpx.Client) -> dict:
+    """从网易云音乐搜索歌词（免费API，中文歌曲覆盖率高）"""
+    result = {"success": False, "lrc_text": "", "method": "", "match_score": 0, "track_info": {}}
+
+    # 搜索歌曲
+    search_kw = f"{artist} {title}" if artist else title
+    try:
+        resp = client.get(
+            "https://music.163.com/api/search/get/web",
+            params={"s": search_kw, "type": 1, "limit": 20},
+            headers={
+                "Referer": "https://music.163.com/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+        )
+        if resp.status_code != 200:
+            return result
+        data = resp.json()
+        songs = data.get("result", {}).get("songs", [])
+        if not songs:
+            # 仅用标题重试
+            if artist:
+                resp = client.get(
+                    "https://music.163.com/api/search/get/web",
+                    params={"s": title, "type": 1, "limit": 20},
+                    headers={
+                        "Referer": "https://music.163.com/",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    songs = data.get("result", {}).get("songs", [])
+            if not songs:
+                return result
+    except Exception as e:
+        print(f"[auto-lyrics] netease search failed: {e}")
+        return result
+
+    # 对搜索结果评分
+    best_song = None
+    best_score = 0
+    for song in songs[:10]:
+        ne_title = song.get("name", "")
+        ne_artists = " ".join(a.get("name", "") for a in song.get("artists", []))
+        ne_duration = song.get("duration", 0) / 1000.0  # 毫秒转秒
+
+        title_score = _calculate_title_score(title, ne_title)
+        if artist and ne_artists:
+            artist_score = _calculate_artist_score(artist, ne_artists)
+            score = title_score * 0.6 + artist_score * 0.4
+        else:
+            score = title_score
+
+        # 时长惩罚
+        if duration > 0 and ne_duration > 0:
+            diff = abs(duration - ne_duration)
+            if diff <= 5:
+                pass
+            elif diff <= 15:
+                score -= 5
+            elif diff <= 30:
+                score -= 15
+            else:
+                score -= 25
+
+        if title_score < 30:
+            score = max(0, score - 35)
+
+        if score > best_score:
+            best_score = score
+            best_song = song
+
+    if not best_song or best_score < 40:
+        if best_song:
+            print(f"[auto-lyrics] netease best score {best_score:.1f} < 40: {best_song.get('name')}")
+        return result
+
+    # 获取歌词
+    song_id = best_song["id"]
+    try:
+        resp = client.get(
+            f"https://music.163.com/api/song/lyric",
+            params={"id": song_id, "lv": 1, "tv": -1},
+            headers={
+                "Referer": "https://music.163.com/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+        )
+        if resp.status_code != 200:
+            return result
+        lyric_data = resp.json()
+        lrc_text = lyric_data.get("lrc", {}).get("lyric", "")
+        if not lrc_text or len(lrc_text.strip()) < 20:
+            return result
+
+        ne_artists = " / ".join(a.get("name", "") for a in best_song.get("artists", []))
+        result["success"] = True
+        result["lrc_text"] = lrc_text
+        result["method"] = "网易云音乐匹配"
+        result["match_score"] = round(best_score, 1)
+        result["track_info"] = {
+            "title": best_song.get("name", ""),
+            "artist": ne_artists,
+            "album": best_song.get("album", {}).get("name", ""),
+        }
+        print(f"[auto-lyrics] netease matched: {best_song.get('name')} - {ne_artists} (score={best_score:.1f})")
+        return result
+    except Exception as e:
+        print(f"[auto-lyrics] netease lyric fetch failed: {e}")
+        return result
 
 
 def _estimate_difficulty(text: str, start: float, end: float, is_chorus: bool) -> str:
@@ -644,20 +1019,39 @@ def _split_and_analyze(song_id: str, filepath: str, duration: float, full_lyrics
             if not has_lyrics:
                 print("[split] AI lyrics assignment produced no results, falling back to rule-based")
 
-    # 如果没有歌词，自动从 lrclib.net 获取
+    # 如果没有歌词，自动从 lrclib.net / 网易云获取
     if not has_lyrics and title:
         print(f"[split] no lyrics provided, trying auto-fetch for '{title}' by '{artist}'...")
         fetch_result = _auto_fetch_lyrics(title, artist, duration)
         if fetch_result["success"] and fetch_result["lrc_text"]:
-            lrc_lines = _parse_lrc(fetch_result["lrc_text"])
-            if lrc_lines:
-                segments = _assign_lrc_to_segments(segments, lrc_lines)
+            fetched_text = fetch_result["lrc_text"]
+            if _is_lrc_format(fetched_text):
+                lrc_lines = _parse_lrc(fetched_text)
+                if lrc_lines:
+                    # 检测分段是否太粗糙
+                    max_seg_dur = max((s["end_time"] - s["start_time"]) for s in segments) if segments else 0
+                    if (max_seg_dur > 60 or len(segments) < 5) and len(lrc_lines) >= 8:
+                        print(f"[split] segments too coarse (max_dur={max_seg_dur:.1f}s), "
+                              f"resegmenting by LRC timestamps...")
+                        new_segs = _resegment_by_lrc(song_id, lrc_lines, duration)
+                        if new_segs and any(s.get("lyrics", "").strip() for s in new_segs):
+                            segments = new_segs
+                            has_lyrics = True
+                            print(f"[split] resegmented: {len(segments)} segments from LRC")
+                    if not has_lyrics:
+                        segments = _assign_lrc_to_segments(segments, lrc_lines)
+                        has_lyrics = any(s["lyrics"] for s in segments)
+                        if has_lyrics:
+                            print(f"[split] auto-fetched LRC via {fetch_result['method']} "
+                                  f"(score={fetch_result['match_score']}, {len(lrc_lines)} lines)")
+            if not has_lyrics:
+                # 纯文本歌词：用 AI 智能分配
+                segments = _ai_assign_lyrics(segments, fetched_text)
                 has_lyrics = any(s["lyrics"] for s in segments)
                 if has_lyrics:
-                    print(f"[split] auto-fetched lyrics via {fetch_result['method']} "
-                          f"(score={fetch_result['match_score']}, {len(lrc_lines)} lines)")
+                    print(f"[split] auto-fetched plain text via {fetch_result['method']}, AI assigned")
         if not has_lyrics:
-            print(f"[split] auto-fetch failed or no match (score={fetch_result.get('match_score', 0)})")
+            print(f"[split] auto-fetch failed or no match (score={fetch_result.get('match_score', 0) if 'fetch_result' in dir() else 0})")
 
     # 如果 AI 没分配歌词，用规则估算难度
     if not has_lyrics:
@@ -703,6 +1097,16 @@ async def get_songs():
     """获取所有歌曲列表"""
     songs = []
     for s in SONGS_DB.values():
+        # 检查是否有已发布的成曲
+        published_final = None
+        for f in FINALS_DB.values():
+            if f.get("song_id") == s["id"] and f.get("published"):
+                published_final = {
+                    "id": f["id"],
+                    "audio_url": f["audio_url"],
+                    "duration": f.get("duration", 0),
+                }
+                break
         songs.append({
             "id": s["id"],
             "title": s["title"],
@@ -712,6 +1116,7 @@ async def get_songs():
             "segment_count": s["segment_count"],
             "participant_count": s["participant_count"],
             "completion": s["completion"],
+            "published_final": published_final,
         })
     return {"success": True, "data": songs}
 
@@ -722,7 +1127,24 @@ async def get_song(song_id: str):
     song = SONGS_DB.get(song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
-    return {"success": True, "data": song}
+    # 附加已发布成曲信息
+    published_final = None
+    for f in FINALS_DB.values():
+        if f.get("song_id") == song_id and f.get("published"):
+            published_final = {
+                "id": f["id"],
+                "audio_url": f["audio_url"],
+                "duration": f.get("duration", 0),
+                "song_title": f.get("song_title", ""),
+                "song_artist": f.get("song_artist", ""),
+                "track_count": f.get("track_count", 0),
+                "segment_count": f.get("segment_count", 0),
+                "created_at": f.get("created_at", ""),
+            }
+            break
+    data = dict(song)
+    data["published_final"] = published_final
+    return {"success": True, "data": data}
 
 
 # ============ 唱段接口 ============
@@ -1053,10 +1475,9 @@ async def admin_upload_song(
     request: Request,
     title: str = Form(...),
     artist: str = Form(""),
-    lyrics: str = Form(""),
     audio: UploadFile = File(...),
 ):
-    """上传新歌曲：保存音频文件 → 读取时长 → 静音检测切分 → AI歌词分配"""
+    """上传新歌曲：保存音频文件 → 读取时长（不进行切分，等歌词上传后再切分）"""
     verify_admin(request)
 
     # 检查文件类型
@@ -1082,10 +1503,6 @@ async def admin_upload_song(
 
     audio_url = f"/api/uploads/{safe_filename}"
 
-    # 静音检测切分 + 歌词分配（含自动获取）
-    segments, has_lyrics = _split_and_analyze(song_id, filepath, duration, lyrics,
-                                              title=title.strip(), artist=artist.strip())
-
     song = {
         "id": song_id,
         "title": title.strip() or os.path.splitext(audio.filename or "未命名")[0],
@@ -1094,17 +1511,17 @@ async def admin_upload_song(
         "audio_url": audio_url,
         "audio_file": safe_filename,
         "original_filename": audio.filename,
-        "segment_count": len(segments),
+        "segment_count": 0,
         "participant_count": 0,
         "completion": 0.0,
-        "segments": segments,
-        "has_lyrics": has_lyrics,
+        "segments": [],
+        "has_lyrics": False,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     SONGS_DB[song_id] = song
     _save_db()
 
-    print(f"[upload] new song: {title} ({artist}), duration={duration}s, {len(segments)} segments, has_lyrics={has_lyrics}")
+    print(f"[upload] new song: {title} ({artist}), duration={duration}s, no segments (awaiting lyrics)")
     return {"success": True, "data": song}
 
 
@@ -1205,6 +1622,22 @@ async def admin_delete_song(song_id: str, request: Request):
         if os.path.exists(audio_path):
             try: os.remove(audio_path)
             except: pass
+    # 删除伴奏文件
+    acc_file = song.get("accompaniment_file")
+    if acc_file:
+        acc_path = os.path.join(UPLOAD_DIR, acc_file)
+        if os.path.exists(acc_path):
+            try: os.remove(acc_path)
+            except: pass
+    # 清理最终成曲数据和文件
+    final_ids = [fid for fid, f in FINALS_DB.items() if f.get("song_id") == song_id]
+    for fid in final_ids:
+        final = FINALS_DB.pop(fid, None)
+        if final:
+            final_file = final.get("file_path", "")
+            if final_file and os.path.exists(final_file):
+                try: os.remove(final_file)
+                except: pass
     _save_db()
     return {"success": True, "message": "歌曲已删除"}
 
@@ -1223,17 +1656,45 @@ async def admin_upload_lyrics(song_id: str, request: Request):
         raise HTTPException(status_code=400, detail="歌词内容不能为空")
 
     segments = song["segments"]
+    duration = song.get("duration", 0)
     is_lrc = _is_lrc_format(full_lyrics)
+    resegmented = False
+    no_segments = not segments or len(segments) == 0
 
     if is_lrc:
-        # LRC 格式：精确时间标记，直接解析分配
         lrc_lines = _parse_lrc(full_lyrics)
         if lrc_lines:
-            updated = _assign_lrc_to_segments(segments, lrc_lines)
+            # 如果歌曲还没有唱段，或分段太粗糙，基于LRC进行切分
+            max_seg_dur = max((s["end_time"] - s["start_time"]) for s in segments) if segments else 999
+            if no_segments or ((max_seg_dur > 60 or len(segments) < 5) and len(lrc_lines) >= 8):
+                # 清理旧唱段
+                for seg in segments:
+                    SEGMENTS_DB.pop(seg["id"], None)
+                updated = _resegment_by_lrc(song["id"], lrc_lines, duration)
+                if updated and any(s.get("lyrics", "").strip() for s in updated):
+                    resegmented = True
+                    song["segment_count"] = len(updated)
+            if not resegmented:
+                if no_segments:
+                    # 无唱段且LRC行数不足以切分，先用静音检测创建唱段
+                    filepath = os.path.join(UPLOAD_DIR, song.get("audio_file", ""))
+                    if os.path.exists(filepath):
+                        segments_new, _ = _split_and_analyze(song["id"], filepath, duration)
+                        segments = segments_new
+                        song["segments"] = segments
+                        song["segment_count"] = len(segments)
+                updated = _assign_lrc_to_segments(segments, lrc_lines)
         else:
             updated = segments
     else:
-        # 纯文本歌词：用 AI 智能分配
+        # 纯文本歌词：如果没有唱段，先用静音检测创建
+        if no_segments:
+            filepath = os.path.join(UPLOAD_DIR, song.get("audio_file", ""))
+            if os.path.exists(filepath):
+                segments_new, _ = _split_and_analyze(song["id"], filepath, duration)
+                segments = segments_new
+                song["segments"] = segments
+                song["segment_count"] = len(segments)
         updated = _ai_assign_lyrics(segments, full_lyrics)
 
     has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
@@ -1244,11 +1705,14 @@ async def admin_upload_lyrics(song_id: str, request: Request):
     # 更新唱段和歌曲状态
     song["segments"] = updated
     song["has_lyrics"] = True
+    song["segment_count"] = len(updated)
     for seg in updated:
         SEGMENTS_DB[seg["id"]] = seg
     _save_db()
 
     method = "LRC精确匹配" if is_lrc else "AI智能分配"
+    if resegmented:
+        method += "（已按歌词重新分段）"
     assigned = sum(1 for s in updated if s.get('lyrics'))
     print(f"[lyrics] song {song_id}: {method}, lyrics assigned to {assigned} segments")
     return {"success": True, "data": {"has_lyrics": True, "segment_count": len(updated), "method": method}}
@@ -1279,14 +1743,57 @@ async def admin_auto_fetch_lyrics(song_id: str, request: Request):
             "data": {"match_score": fetch_result["match_score"], "track_info": fetch_result.get("track_info", {})}
         }
 
-    # 解析 LRC 并分配到唱段
-    lrc_lines = _parse_lrc(fetch_result["lrc_text"])
-    if not lrc_lines:
-        return {"success": False, "detail": "歌词解析失败"}
-
+    # 解析歌词并分配到唱段
+    fetched_text = fetch_result["lrc_text"]
     segments = song["segments"]
-    updated = _assign_lrc_to_segments(segments, lrc_lines)
-    has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
+    has_lyrics = False
+    resegmented = False
+    no_segments = not segments or len(segments) == 0
+
+    if _is_lrc_format(fetched_text):
+        lrc_lines = _parse_lrc(fetched_text)
+        if lrc_lines:
+            # 检测现有分段是否太粗糙（某段超过60秒，或总段数太少），或无唱段
+            max_seg_dur = max((s["end_time"] - s["start_time"]) for s in segments) if segments else 999
+            needs_resegment = no_segments or ((max_seg_dur > 60 or len(segments) < 5) and len(lrc_lines) >= 8)
+
+            if needs_resegment:
+                print(f"[auto-lyrics] segments too coarse or empty (max_dur={max_seg_dur:.1f}s, "
+                      f"count={len(segments)}), resegmenting by LRC timestamps...")
+                # 先清理旧唱段
+                for seg in segments:
+                    SEGMENTS_DB.pop(seg["id"], None)
+                # 基于 LRC 时间戳重新切分
+                updated = _resegment_by_lrc(song["id"], lrc_lines, duration)
+                if updated:
+                    has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
+                    resegmented = True
+                    song["segment_count"] = len(updated)
+
+            if not has_lyrics:
+                if no_segments:
+                    # 无唱段且LRC行数不足以切分，先用静音检测创建唱段
+                    filepath = os.path.join(UPLOAD_DIR, song.get("audio_file", ""))
+                    if os.path.exists(filepath):
+                        segments_new, _ = _split_and_analyze(song["id"], filepath, duration)
+                        segments = segments_new
+                        song["segments"] = segments
+                        song["segment_count"] = len(segments)
+                # 正常分配：分段足够细，直接按时间匹配
+                updated = _assign_lrc_to_segments(segments, lrc_lines)
+                has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
+    
+    if not has_lyrics:
+        # 纯文本歌词或 LRC 匹配失败：如果没有唱段先创建
+        if no_segments:
+            filepath = os.path.join(UPLOAD_DIR, song.get("audio_file", ""))
+            if os.path.exists(filepath):
+                segments_new, _ = _split_and_analyze(song["id"], filepath, duration)
+                segments = segments_new
+                song["segments"] = segments
+                song["segment_count"] = len(segments)
+        updated = _ai_assign_lyrics(segments, fetched_text)
+        has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
 
     if not has_lyrics:
         return {"success": False, "detail": "歌词已获取但无法匹配到任何唱段，可能时间戳不对应"}
@@ -1294,22 +1801,27 @@ async def admin_auto_fetch_lyrics(song_id: str, request: Request):
     # 更新数据库
     song["segments"] = updated
     song["has_lyrics"] = True
+    song["segment_count"] = len(updated)
     for seg in updated:
         SEGMENTS_DB[seg["id"]] = seg
     _save_db()
 
     assigned = sum(1 for s in updated if s.get('lyrics'))
-    print(f"[auto-lyrics] success: {fetch_result['method']}, score={fetch_result['match_score']}, "
-          f"{assigned}/{len(updated)} segments assigned")
+    method_desc = fetch_result["method"]
+    if resegmented:
+        method_desc += "（已按歌词重新分段）"
+    print(f"[auto-lyrics] success: {method_desc}, score={fetch_result['match_score']}, "
+          f"{assigned}/{len(updated)} segments assigned, resegmented={resegmented}")
     return {
         "success": True,
         "data": {
             "has_lyrics": True,
             "segment_count": len(updated),
             "assigned_count": assigned,
-            "method": fetch_result["method"],
+            "method": method_desc,
             "match_score": fetch_result["match_score"],
             "track_info": fetch_result["track_info"],
+            "resegmented": resegmented,
         }
     }
 

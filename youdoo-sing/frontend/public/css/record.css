@@ -117,6 +117,20 @@
     background-repeat: no-repeat;
     transition: none;
 }
+
+/* 多行歌词子行 — 每行独立扫描 */
+.lyric-sub-line {
+    display: block;
+    width: 100%;
+}
+.lyric-line.mtv-scan .lyric-sub-line {
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+}
 .lyric-char {
     display: inline-block;
     color: rgba(255,255,255,0.3);

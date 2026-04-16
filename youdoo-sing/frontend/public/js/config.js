@@ -6,6 +6,7 @@ const AudioManager = {
     _current: null,
     _onStop: null,
     _pitchSemitones: 0,
+    _rangeRAF: 0,
 
     /** 设置升降调（半音数），范围 -6 ~ +6 */
     setPitch(semitones) {
@@ -63,35 +64,65 @@ const AudioManager = {
         if (!src.startsWith('blob:')) audio.crossOrigin = 'anonymous';
         this._applyPitch(audio);
         this._current = audio;
+        let _rangeEnded = false;  // 标记是否已由 finishRange 触发结束
 
-        const checkTime = () => {
-            if (audio.currentTime >= endTime) {
-                audio.pause();
-                this._current = null;
-                if (this._onStop) this._onStop();
-                this._onStop = null;
-                if (onEnd) onEnd();
-            }
-            if (onTimeUpdate) onTimeUpdate(audio.currentTime, audio.duration);
-        };
-        audio.ontimeupdate = checkTime;
-        audio.onplay = () => {
-            if (this._onStop) this._onStop('playing');
-        };
-        audio.onpause = () => {
-            this._current = null;
-            this._onStop = null;
-        };
-        audio.onended = () => {
-            this._current = null;
-            if (this._onStop) this._onStop();
-            this._onStop = null;
+        const self = this;
+        // 清理上一次的 RAF
+        if (self._rangeRAF) { cancelAnimationFrame(self._rangeRAF); self._rangeRAF = 0; }
+
+        const finishRange = () => {
+            if (_rangeEnded) return;
+            _rangeEnded = true;
+            if (self._rangeRAF) { cancelAnimationFrame(self._rangeRAF); self._rangeRAF = 0; }
+            audio.onpause = null;
+            audio.ontimeupdate = null;
+            audio.onended = null;
+            audio.pause();
+            self._current = null;
+            if (self._onStop) self._onStop();
+            self._onStop = null;
             if (onEnd) onEnd();
         };
+
+        // 高频 RAF 检测循环（~60fps），确保精确检测 endTime
+        const tickRange = () => {
+            if (_rangeEnded) return;
+            if (audio.currentTime >= endTime) {
+                console.log('[playRange] RAF检测到达endTime, cur=', audio.currentTime, 'end=', endTime);
+                finishRange();
+                return;
+            }
+            if (onTimeUpdate) onTimeUpdate(audio.currentTime, audio.duration);
+            self._rangeRAF = requestAnimationFrame(tickRange);
+        };
+
+        audio.onplay = () => {
+            if (self._onStop) self._onStop('playing');
+            // 启动 RAF 检测循环
+            if (!self._rangeRAF && !_rangeEnded) {
+                self._rangeRAF = requestAnimationFrame(tickRange);
+            }
+        };
+        audio.onpause = () => {
+            // 停止 RAF 循环
+            if (self._rangeRAF) { cancelAnimationFrame(self._rangeRAF); self._rangeRAF = 0; }
+            // 仅在非 finishRange 触发的 pause 时清除（如外部调用 stop()）
+            if (!_rangeEnded) {
+                self._current = null;
+                self._onStop = null;
+            }
+        };
+        audio.onended = () => {
+            if (_rangeEnded) return;
+            console.log('[playRange] onended 触发');
+            finishRange();
+        };
         audio.onerror = () => {
-            this._current = null;
-            if (this._onStop) this._onStop();
-            this._onStop = null;
+            if (self._rangeRAF) { cancelAnimationFrame(self._rangeRAF); self._rangeRAF = 0; }
+            _rangeEnded = true;
+            self._current = null;
+            if (self._onStop) self._onStop();
+            self._onStop = null;
             showToast('音频加载失败');
         };
 
@@ -119,6 +150,8 @@ const AudioManager = {
     },
 
     stop() {
+        // 清理 playRange 的 RAF 循环
+        if (this._rangeRAF) { cancelAnimationFrame(this._rangeRAF); this._rangeRAF = 0; }
         if (this._current) {
             this._current.onpause = null;
             this._current.ontimeupdate = null;

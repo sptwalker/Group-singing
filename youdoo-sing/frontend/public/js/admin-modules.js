@@ -52,7 +52,7 @@ async function renderSongs(container) {
         <div class="empty-state" style="padding:60px 20px;text-align:center;">
             <div class="empty-icon" style="font-size:48px;margin-bottom:16px;">🎵</div>
             <h3 style="margin-bottom:8px;color:var(--text-primary);">歌曲库为空</h3>
-            <p style="color:var(--text-secondary);margin-bottom:20px;">点击上方按钮上传第一首歌曲，系统将自动完成唱段切分</p>
+            <p style="color:var(--text-secondary);margin-bottom:20px;">点击上方按钮上传第一首歌曲</p>
             <button class="btn btn-primary" onclick="showUploadSongDialog()">+ 上传新歌曲</button>
         </div>` : `
         <div class="song-grid">${songs.map(s => `
@@ -84,7 +84,10 @@ async function renderSongs(container) {
                 </div>
                 <div class="song-card-actions">
                     <button class="btn btn-outline btn-sm" onclick="editSongInfo('${s.id}')">编辑信息</button>
-                    <button class="btn btn-primary btn-sm" onclick="openEditorForSong('${s.id}')">分段编辑</button>
+                    ${(s.has_accompaniment && s.has_lyrics)
+                        ? `<button class="btn btn-primary btn-sm" onclick="openEditorForSong('${s.id}')">分段编辑</button>`
+                        : `<button class="btn btn-outline btn-sm" onclick="showEditorRequirements('${s.id}',${!!s.has_accompaniment},${!!s.has_lyrics})" title="需要伴奏和歌词才能进入分段编辑" style="opacity:0.7;">分段编辑</button>`
+                    }
                     <button class="btn btn-danger btn-sm" onclick="deleteSong('${s.id}','${s.title}')">删除</button>
                 </div>
             </div>
@@ -117,10 +120,6 @@ function showUploadSongDialog() {
             <label style="display:block;font-weight:600;margin-bottom:6px;">艺术家</label>
             <input id="uploadArtist" placeholder="输入艺术家名称（可选）" style="width:100%;padding:8px 12px;border:1.5px solid var(--border);border-radius:6px;font-size:14px;">
         </div>
-        <div class="field" style="margin-bottom:16px;">
-            <label style="display:block;font-weight:600;margin-bottom:6px;">歌词 <span style="color:var(--text-light);font-weight:400;font-size:12px;">（可选，支持 LRC 格式或纯文本）</span></label>
-            <textarea id="uploadLyrics" placeholder="[00:12.50]第一句歌词&#10;[00:18.30]第二句歌词&#10;...&#10;&#10;推荐粘贴 LRC 格式歌词（精确匹配），也支持纯文本（AI智能分配）" style="width:100%;padding:8px 12px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;min-height:100px;resize:vertical;font-family:'Consolas','Courier New',monospace;line-height:1.5;"></textarea>
-        </div>
         <div id="uploadProgress" style="display:none;margin-top:12px;">
             <div style="display:flex;align-items:center;gap:10px;">
                 <div style="flex:1;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;">
@@ -130,7 +129,7 @@ function showUploadSongDialog() {
             </div>
             <p id="uploadStatusText" style="font-size:12px;color:var(--text-secondary);margin-top:6px;">上传中...</p>
         </div>
-    `, `<button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" id="btnDoUpload" onclick="doUploadSong()">上传并智能切分</button>`);
+    `, `<button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" id="btnDoUpload" onclick="doUploadSong()">上传歌曲</button>`);
 
     // 绑定事件
     const dropZone = document.getElementById('uploadDropZone');
@@ -195,7 +194,6 @@ async function doUploadSong() {
     const formData = new FormData();
     formData.append('title', title);
     formData.append('artist', document.getElementById('uploadArtist').value.trim());
-    formData.append('lyrics', (document.getElementById('uploadLyrics')?.value || '').trim());
     formData.append('audio', file);
 
     try {
@@ -206,7 +204,7 @@ async function doUploadSong() {
                     const pct = Math.round(e.loaded / e.total * 100);
                     document.getElementById('uploadProgressBar').style.width = pct + '%';
                     document.getElementById('uploadProgressText').textContent = pct + '%';
-                    document.getElementById('uploadStatusText').textContent = pct < 100 ? '上传中...' : '正在智能切分唱段，请稍候...';
+                    document.getElementById('uploadStatusText').textContent = pct < 100 ? '上传中...' : '正在处理音频文件...';
                 }
             });
             xhr.addEventListener('load', () => {
@@ -224,22 +222,11 @@ async function doUploadSong() {
         });
 
         closeModal();
-        if (result.data.has_lyrics) {
-            showToast(`歌曲 "${title}" 上传成功，已切分为 ${result.data.segment_count} 个唱段，歌词已精确匹配`, 'success');
-        } else {
-            showToast(`歌曲 "${title}" 上传成功，已自动切分为 ${result.data.segment_count || '若干'} 个唱段（歌词需在分段编辑器中手动填写）`, 'warning');
-        }
-
-        // 跳转到分段编辑器
-        if (typeof openEditorForSong === 'function') {
-            switchModule('editor');
-            setTimeout(() => openEditorForSong(result.data.id), 300);
-        } else {
-            renderSongs(document.getElementById('moduleContainer'));
-        }
+        showToast(`歌曲 "${title}" 上传成功，请继续上传伴奏和歌词`, 'success');
+        renderSongs(document.getElementById('moduleContainer'));
     } catch (e) {
         showToast(e.message, 'error');
-        btn.disabled = false; btn.textContent = '上传并智能切分';
+        btn.disabled = false; btn.textContent = '上传歌曲';
         document.getElementById('uploadProgress').style.display = 'none';
     }
 }
@@ -269,8 +256,23 @@ async function saveSongInfo(songId) {
     } catch (e) { showToast(e.message, 'error'); }
 }
 
+// ===== 分段编辑器前置条件提示 =====
+function showEditorRequirements(songId, hasAcc, hasLyrics) {
+    const missing = [];
+    if (!hasAcc) missing.push('🎹 伴奏');
+    if (!hasLyrics) missing.push('📝 歌词');
+    showModal('无法进入分段编辑', `
+        <p>进入分段编辑器需要以下条件齐备：</p>
+        <ul style="margin:12px 0;padding-left:20px;line-height:2;">
+            <li style="color:${hasAcc ? 'var(--success)' : 'var(--danger)'};">${hasAcc ? '✅' : '❌'} 伴奏文件</li>
+            <li style="color:${hasLyrics ? 'var(--success)' : 'var(--danger)'};">${hasLyrics ? '✅' : '❌'} 歌词数据</li>
+        </ul>
+        <p style="color:var(--text-secondary);font-size:13px;">请先在歌曲卡片上完成缺失项的上传。</p>
+    `, `<button class="btn btn-primary" onclick="closeModal()">知道了</button>`);
+}
+
 async function deleteSong(songId, title) {
-    showModal('确认删除', `<p>确定要删除歌曲 <strong>${title}</strong> 吗？此操作不可恢复。</p>`,
+    showModal('确认删除', `<p>确定要删除歌曲 <strong>${title}</strong> 吗？</p><p style="color:var(--text-secondary);font-size:13px;margin-top:8px;">将同时删除：原曲音频、伴奏文件、歌词分段数据、所有录音和最终成曲。此操作不可恢复。</p>`,
         `<button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-danger" onclick="confirmDeleteSong('${songId}')">确认删除</button>`);
 }
 async function confirmDeleteSong(songId) {
@@ -414,7 +416,7 @@ function uploadLyricsForSong(songId, songTitle) {
             <textarea id="lyricsText" placeholder="[00:12.50]第一句歌词&#10;[00:18.30]第二句歌词&#10;...&#10;&#10;或直接粘贴纯文本歌词（每行一句），系统将自动识别格式" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;min-height:180px;resize:vertical;font-family:'Consolas','Courier New',monospace;line-height:1.6;"></textarea>
             <p id="lyricsFormatHint" style="font-size:12px;color:var(--text-light);margin-top:6px;">提示：推荐使用 LRC 格式（带时间标记），可精确匹配歌词；纯文本将由 AI 智能分配</p>
         </div>
-    `, `<button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" id="btnDoLyricsUpload" onclick="doUploadLyrics('${songId}')">匹配歌词到唱段</button>`);
+    `, `<button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" id="btnDoLyricsUpload" onclick="doUploadLyrics('${songId}')">上传并切分唱段</button>`);
 
     // 绑定 LRC 文件上传事件
     const dropZone = document.getElementById('lrcDropZone');
@@ -488,17 +490,17 @@ async function doUploadLyrics(songId) {
             renderSongs(document.getElementById('moduleContainer'));
         } else {
             showToast(res.detail || '歌词分配失败，请检查格式', 'error');
-            btn.disabled = false; btn.textContent = '匹配歌词到唱段';
+            btn.disabled = false; btn.textContent = '上传并切分唱段';
         }
     } catch (e) {
         showToast(e.message, 'error');
-        btn.disabled = false; btn.textContent = '匹配歌词到唱段';
+        btn.disabled = false; btn.textContent = '上传并切分唱段';
     }
 }
 
-// ===== 自动获取歌词（lrclib.net） =====
+// ===== 自动获取歌词（多源搜索：lrclib.net + 网易云） =====
 async function autoFetchLyrics(songId, songTitle) {
-    showToast('正在从 lrclib.net 搜索歌词…', 'info');
+    showToast('正在搜索歌词（lrclib + 网易云）…', 'info');
     try {
         const res = await aPost(`/admin/songs/${songId}/auto-lyrics`, {});
         if (res.success && res.data) {
@@ -510,7 +512,7 @@ async function autoFetchLyrics(songId, songTitle) {
                 showToast(`歌词已通过「${method}」分配到 ${d.assigned_count}/${d.segment_count} 个唱段${score}${info}`, 'success');
                 renderSongs(document.getElementById('moduleContainer'));
             } else {
-                showToast('未在 lrclib.net 找到匹配的歌词，请尝试手动上传', 'warning');
+                showToast('未找到匹配的歌词，请尝试手动上传', 'warning');
             }
         } else {
             showToast(res.detail || '自动获取歌词失败', 'error');

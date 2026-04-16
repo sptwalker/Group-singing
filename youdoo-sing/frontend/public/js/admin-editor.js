@@ -39,7 +39,11 @@ async function renderEditor(container) {
             <label style="font-weight:600;font-size:13px;">歌曲：</label>
             <select id="edSongSel">
                 <option value="">-- 请选择 --</option>
-                ${songs.map(s=>`<option value="${s.id}">${s.title} - ${s.artist}</option>`).join('')}
+                ${songs.map(s=>{
+                    const ready = s.has_accompaniment && s.has_lyrics;
+                    const tag = ready ? '' : ((!s.has_accompaniment && !s.has_lyrics) ? ' [缺伴奏+歌词]' : (!s.has_accompaniment ? ' [缺伴奏]' : ' [缺歌词]'));
+                    return `<option value="${s.id}" ${ready?'':'style="color:#999;"'}>${s.title} - ${s.artist}${tag}</option>`;
+                }).join('')}
             </select>
             <span class="toolbar-sep"></span>
             <span id="edSongTitle" class="toolbar-title"></span>
@@ -76,6 +80,10 @@ async function renderEditor(container) {
                         <div class="seg-overlay-container" id="segOverlay"></div>
                     </div>
                 </div>
+                <div class="wave-subtitle-area" id="waveSubtitle">
+                    <div class="wave-subtitle-line" id="waveSubLine1"></div>
+                    <div class="wave-subtitle-line" id="waveSubLine2"></div>
+                </div>
                 <div class="seg-detail-panel" id="segDetailPanel">
                     <div class="seg-detail-info" id="segDetailInfo">
                         <span class="seg-detail-empty">选择唱段查看详情</span>
@@ -86,8 +94,7 @@ async function renderEditor(container) {
                             <span class="time-sep">\u2192</span>
                             <input type="number" step="0.1" id="segDetailEnd" class="seg-detail-time" title="结束时间" disabled>
                             <button class="btn btn-outline btn-sm" id="sdBtnPlaySeg" disabled title="从头播放本段">⏮ 从头</button>
-                            <button class="btn btn-outline btn-sm" id="sdBtnResumeSeg" disabled title="从进度线播放">▶ 播放</button>
-                            <button class="btn btn-outline btn-sm" id="sdBtnPauseSeg" disabled title="暂停">⏸ 暂停</button>
+                            <button class="btn btn-outline btn-sm" id="sdBtnPlayPauseSeg" disabled title="播放/暂停">▶ 播放</button>
                             <span class="toolbar-sep"></span>
                             <button class="btn btn-outline btn-sm" id="sdBtnAdjust" disabled title="将下一段分界线移到进度线位置">✂️ 调整切分</button>
                             <button class="btn btn-outline btn-sm" id="sdBtnSplit" disabled title="在进度线位置新增拆分">➕ 新增切分</button>
@@ -100,8 +107,7 @@ async function renderEditor(container) {
         </div>
         <div class="editor-playbar" id="edPlaybar">
             <button class="btn btn-outline btn-sm" id="btnPlay" disabled>⏮</button>
-            <button class="btn btn-outline btn-sm" id="btnResume" disabled>▶</button>
-            <button class="btn btn-outline btn-sm" id="btnPause" disabled>⏸</button>
+            <button class="btn btn-outline btn-sm" id="btnPlayPause" disabled title="播放/暂停">▶</button>
             <button class="btn btn-outline btn-sm" id="btnLoop" disabled title="循环选中段">🔁</button>
             <span class="playbar-time" id="pbTime">0:00 / 0:00</span>
             <div class="playbar-progress" id="pbProgress"><div class="playbar-progress-fill" id="pbFill"></div></div>
@@ -290,13 +296,19 @@ function _setPlayButtonState(isPlaying) {
     if(btnPlay) btnPlay.textContent = '⏮';
     btnPlay?.classList.toggle('btn-primary', !isPlaying);
     btnPlay?.classList.toggle('btn-outline', isPlaying);
-    const btnResume = document.getElementById('btnResume');
-    if(btnResume) btnResume.textContent = '▶';
-    btnResume?.classList.toggle('btn-primary', isPlaying);
-    btnResume?.classList.toggle('btn-outline', !isPlaying);
-    const btnPause = document.getElementById('btnPause');
-    btnPause?.classList.toggle('btn-primary', isPlaying);
-    btnPause?.classList.toggle('btn-outline', !isPlaying);
+    const btnPlayPause = document.getElementById('btnPlayPause');
+    if(btnPlayPause) {
+        btnPlayPause.textContent = isPlaying ? '⏸ 暂停' : '▶ 播放';
+        btnPlayPause.classList.toggle('btn-primary', isPlaying);
+        btnPlayPause.classList.toggle('btn-outline', !isPlaying);
+    }
+    // seg detail play/pause toggle
+    const sdBtn = document.getElementById('sdBtnPlayPauseSeg');
+    if(sdBtn) {
+        sdBtn.textContent = isPlaying ? '⏸ 暂停' : '▶ 播放';
+        sdBtn.classList.toggle('btn-primary', isPlaying);
+        sdBtn.classList.toggle('btn-outline', !isPlaying);
+    }
 }
 
 function _setLoopButtonState() {
@@ -842,16 +854,18 @@ function _bindEditorEvents() {
         if(!editorSong) return;
         _playEditorAudioFrom(0, { segmentIdx: -1, resume: false });
     };
-    $('btnResume').onclick = async () => {
+    $('btnPlayPause').onclick = async () => {
         if(!editorSong) return;
-        const audio = _ensureEditorAudio();
-        const resumeTime = audio.currentTime || 0;
-        _playEditorAudioFrom(resumeTime, { segmentIdx: -1, resume: true });
+        if(_editorIsPlaying && editorAudio && !editorAudio.paused) {
+            _pauseEditorAudio();
+        } else {
+            const audio = _ensureEditorAudio();
+            const resumeTime = audio.currentTime || 0;
+            _playEditorAudioFrom(resumeTime, { segmentIdx: -1, resume: true });
+        }
     };
-    $('btnPause').onclick = () => {
-        if(!editorSong) return;
-        _pauseEditorAudio();
-    };
+
+
 
 
 
@@ -891,13 +905,16 @@ function _bindEditorEvents() {
     };
 
     $('sdBtnPlaySeg').onclick = () => { if(editorActiveIdx>=0) _playSeg(editorActiveIdx); };
-    $('sdBtnResumeSeg').onclick = () => {
+    $('sdBtnPlayPauseSeg').onclick = () => {
         if(!editorSong || editorActiveIdx < 0) return;
-        const audio = _ensureEditorAudio();
-        const seg = editorSegments[editorActiveIdx];
-        if(seg) _playEditorAudioFrom(audio.currentTime || seg.start_time, { segmentIdx: editorActiveIdx, resume: true });
+        if(_editorIsPlaying && editorAudio && !editorAudio.paused && _playingSegOnly) {
+            _pauseSegmentAudio(editorActiveIdx);
+        } else {
+            const audio = _ensureEditorAudio();
+            const seg = editorSegments[editorActiveIdx];
+            if(seg) _playEditorAudioFrom(audio.currentTime || seg.start_time, { segmentIdx: editorActiveIdx, resume: true });
+        }
     };
-    $('sdBtnPauseSeg').onclick = () => { if(editorActiveIdx>=0) _pauseSegmentAudio(editorActiveIdx); };
     $('sdBtnAdjust').onclick = () => {
         if(!editorSong || editorSegments.length === 0) return;
         const t = Math.round(_getEditorCurrentTime() * 10) / 10;
@@ -989,7 +1006,7 @@ function _edKeydown(e) {
     if(!editorSong) return;
     const tag = (e.target.tagName||'').toLowerCase();
     if(tag==='input'||tag==='textarea'||tag==='select') return;
-    if(e.key===' ') { e.preventDefault(); document.getElementById('btnPlay')?.click(); }
+    if(e.key===' ') { e.preventDefault(); document.getElementById('btnPlayPause')?.click(); }
     if(e.key==='Delete'&&editorActiveIdx>=0) { e.preventDefault(); _deleteSegment(editorActiveIdx); }
     if(e.key==='ArrowLeft') { e.preventDefault(); _nudgeSegTime(-0.1); }
     if(e.key==='ArrowRight') { e.preventDefault(); _nudgeSegTime(0.1); }
@@ -1003,6 +1020,13 @@ async function _loadSong(songId) {
     try {
         const res = await aGet(`/admin/songs/${songId}`);
         editorSong = res.data;
+        // 检查前置条件并提示
+        const missing = [];
+        if (!editorSong.has_accompaniment) missing.push('伴奏');
+        if (!editorSong.has_lyrics) missing.push('歌词');
+        if (missing.length > 0) {
+            showToast(`提示：该歌曲缺少${missing.join('和')}，请先在歌曲库中上传后再进行最终合成`, 'warning');
+        }
         editorSegments = JSON.parse(JSON.stringify(editorSong.segments||[]));
         editorActiveIdx = -1;
         _editorPlayingIdx = -1;
@@ -1021,7 +1045,7 @@ async function _loadSong(songId) {
         document.getElementById('edSongTitle').textContent = `${editorSong.title} - ${editorSong.artist}`;
         document.getElementById('edUnsaved').style.display = 'none';
         const _en = id => { const el = document.getElementById(id); if(el) el.disabled = false; };
-        _en('btnSaveAll'); _en('btnReset'); _en('btnPlay'); _en('btnResume'); _en('btnPause'); _en('btnLoop');
+        _en('btnSaveAll'); _en('btnReset'); _en('btnPlay'); _en('btnPlayPause'); _en('btnLoop');
         _syncToolbarSegButtons();
         _initWS();
         _renderSegList();
@@ -1139,6 +1163,7 @@ function _updatePlaybar(t) {
     if(pbFill) pbFill.style.width = dur ? (cur/dur*100)+'%' : '0%';
     _updateCursorLine(cur);
     _syncDetailWithCursor(cur);
+    _updateWaveSubtitle(cur);
 }
 
 function _syncDetailWithCursor(cur) {
@@ -1150,6 +1175,71 @@ function _syncDetailWithCursor(cur) {
         _renderOverlay();
     }
     _renderSegDetail();
+}
+
+// ===== 波形字幕区 - MTV扫描式歌词显示 =====
+function _updateWaveSubtitle(cur) {
+    const line1 = document.getElementById('waveSubLine1');
+    const line2 = document.getElementById('waveSubLine2');
+    if(!line1 || !line2) return;
+    if(!editorSong || !editorSegments.length) {
+        line1.textContent = '';
+        line2.textContent = '';
+        line1.className = 'wave-subtitle-line';
+        line2.className = 'wave-subtitle-line';
+        return;
+    }
+    // 找当前所在唱段
+    const curIdx = editorSegments.findIndex(s => cur >= s.start_time && cur < s.end_time);
+    if(curIdx < 0) {
+        // 不在任何唱段内 - 找下一个即将开始的唱段
+        const nextIdx = editorSegments.findIndex(s => s.start_time > cur);
+        if(nextIdx >= 0) {
+            const nextSeg = editorSegments[nextIdx];
+            line1.textContent = nextSeg.lyrics || `♪ 唱段 ${nextSeg.index} ♪`;
+            line1.className = 'wave-subtitle-line';
+            line2.textContent = nextIdx + 1 < editorSegments.length ? (editorSegments[nextIdx + 1].lyrics || '') : '';
+            line2.className = 'wave-subtitle-line';
+        } else {
+            line1.textContent = '';
+            line2.textContent = '';
+            line1.className = 'wave-subtitle-line';
+            line2.className = 'wave-subtitle-line';
+        }
+        return;
+    }
+    const seg = editorSegments[curIdx];
+    const lyrics = seg.lyrics || `♪ 唱段 ${seg.index} ♪`;
+    const duration = seg.end_time - seg.start_time;
+    const elapsed = cur - seg.start_time;
+    const progress = Math.min(1, Math.max(0, elapsed / duration));
+    // 当前行 - MTV扫描效果
+    line1.textContent = lyrics;
+    const pct = (progress * 100).toFixed(1);
+    const hiColor = 'rgba(255,255,255,0.95)';
+    const loColor = 'rgba(255,255,255,0.3)';
+    line1.style.background = `linear-gradient(90deg, ${hiColor} ${pct}%, ${loColor} ${pct}%)`;
+    line1.style.webkitBackgroundClip = 'text';
+    line1.style.backgroundClip = 'text';
+    line1.style.webkitTextFillColor = 'transparent';
+    line1.className = 'wave-subtitle-line subtitle-active mtv-scan';
+    // 下一行预览
+    const nextIdx = curIdx + 1;
+    if(nextIdx < editorSegments.length) {
+        line2.textContent = editorSegments[nextIdx].lyrics || `♪ 唱段 ${editorSegments[nextIdx].index} ♪`;
+        line2.className = 'wave-subtitle-line';
+        line2.style.background = '';
+        line2.style.webkitBackgroundClip = '';
+        line2.style.backgroundClip = '';
+        line2.style.webkitTextFillColor = '';
+    } else {
+        line2.textContent = '';
+        line2.className = 'wave-subtitle-line';
+        line2.style.background = '';
+        line2.style.webkitBackgroundClip = '';
+        line2.style.backgroundClip = '';
+        line2.style.webkitTextFillColor = '';
+    }
 }
 
 // ===== 唱段覆盖层渲染 =====
@@ -1362,7 +1452,7 @@ function _renderSegDetail() {
     const alwaysIds = ['sdBtnAdjust', 'sdBtnSplit'];
     alwaysIds.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = !editorSong; });
 
-    const segOnlyIds = ['sdBtnPlaySeg', 'sdBtnResumeSeg', 'sdBtnPauseSeg', 'sdBtnDelete'];
+    const segOnlyIds = ['sdBtnPlaySeg', 'sdBtnPlayPauseSeg', 'sdBtnDelete'];
     segOnlyIds.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = !hasSeg; });
 
     const btnMerge = document.getElementById('sdBtnMerge');

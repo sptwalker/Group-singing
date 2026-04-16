@@ -1347,8 +1347,20 @@ function _expTickRecAudios() {
 // ===== 最终成曲模块 =====
 let _finalsPlayingAudio = null;
 let _finalsPlayingId = null;
+let _finalsAudioCtx = null;
+let _finalsAnalyser = null;
+let _finalsSource = null;
+let _finalsWaveRAF = 0;
+let _finalsTimeRAF = 0;
+
+function _getFinalsAudioCtx() {
+    if (!_finalsAudioCtx) _finalsAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_finalsAudioCtx.state === 'suspended') _finalsAudioCtx.resume();
+    return _finalsAudioCtx;
+}
 
 async function renderFinals(container) {
+    _stopFinalsPlayback();
     try {
         const res = await aGet('/admin/finals');
         const finals = res.data || [];
@@ -1360,7 +1372,6 @@ async function renderFinals(container) {
         <div class="finals-list" id="finalsList">
             ${finals.length ? finals.map(f => _renderFinalCard(f)).join('') : '<div class="empty-state"><div class="empty-icon">🎵</div><p>暂无成曲，请在"合成导出"页面完成合成</p></div>'}
         </div>`;
-        // 绑定事件
         _bindFinalsEvents();
     } catch (e) {
         container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>${e.message}</p></div>`;
@@ -1376,22 +1387,33 @@ function _renderFinalCard(f) {
         : `<button class="btn btn-success btn-sm" data-action="publish" data-id="${f.id}">发布</button>`;
     return `
     <div class="final-card" data-final-id="${f.id}">
-        <div class="final-card-left">
-            <button class="final-play-btn" data-action="play" data-id="${f.id}" data-url="${f.audio_url}" title="播放">▶</button>
-            <div class="final-info">
-                <div class="final-title">${f.song_title || '未命名'} <span class="final-artist">${f.song_artist || ''}</span></div>
-                <div class="final-meta">
-                    ${statusBadge}
-                    <span>${f.segment_count || 0} 唱段</span>
-                    <span>${f.track_count || 0} 轨</span>
-                    <span>${fmtTime(f.duration || 0)}</span>
-                    <span class="final-date">${f.created_at || ''}</span>
+        <div class="final-card-body">
+            <div class="final-card-top">
+                <button class="final-play-btn" data-action="play" data-id="${f.id}" data-url="${f.audio_url}" data-dur="${f.duration || 0}" title="播放">▶</button>
+                <div class="final-info">
+                    <div class="final-title">${f.song_title || '未命名'} <span class="final-artist">${f.song_artist || ''}</span></div>
+                    <div class="final-meta">
+                        ${statusBadge}
+                        <span>${f.segment_count || 0} 唱段</span>
+                        <span>${f.track_count || 0} 轨</span>
+                        <span>${fmtTime(f.duration || 0)}</span>
+                        <span class="final-date">${f.created_at || ''}</span>
+                    </div>
+                </div>
+                <div class="final-card-right">
+                    ${publishBtn}
+                    <button class="btn btn-danger btn-sm" data-action="delete" data-id="${f.id}">删除</button>
                 </div>
             </div>
-        </div>
-        <div class="final-card-right">
-            ${publishBtn}
-            <button class="btn btn-danger btn-sm" data-action="delete" data-id="${f.id}">删除</button>
+            <div class="final-player-row" id="finalPlayer_${f.id}" style="display:none;">
+                <canvas class="final-wave-canvas" id="finalWave_${f.id}" width="800" height="40"></canvas>
+                <div class="final-time-bar">
+                    <div class="final-progress-track" id="finalTrack_${f.id}">
+                        <div class="final-progress-fill" id="finalFill_${f.id}"></div>
+                    </div>
+                    <span class="final-time-label" id="finalTime_${f.id}">0:00 / ${fmtTime(f.duration || 0)}</span>
+                </div>
+            </div>
         </div>
     </div>`;
 }
@@ -1400,12 +1422,20 @@ function _bindFinalsEvents() {
     const list = document.getElementById('finalsList');
     if (!list) return;
     list.addEventListener('click', async e => {
+        // 进度条点击 seek
+        const track = e.target.closest('.final-progress-track');
+        if (track && _finalsPlayingAudio) {
+            const rect = track.getBoundingClientRect();
+            const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            _finalsPlayingAudio.currentTime = ratio * (_finalsPlayingAudio.duration || 0);
+            return;
+        }
         const btn = e.target.closest('[data-action]');
         if (!btn) return;
         const action = btn.dataset.action;
         const id = btn.dataset.id;
         if (action === 'play') {
-            _toggleFinalPlay(btn, id, btn.dataset.url);
+            _toggleFinalPlay(btn, id, btn.dataset.url, parseFloat(btn.dataset.dur) || 0);
         } else if (action === 'publish') {
             try {
                 await aPost(`/admin/finals/${id}/publish`, {});
@@ -1429,29 +1459,109 @@ function _bindFinalsEvents() {
     });
 }
 
-function _toggleFinalPlay(btn, id, url) {
-    // 停止当前播放
+function _stopFinalsPlayback() {
+    if (_finalsWaveRAF) { cancelAnimationFrame(_finalsWaveRAF); _finalsWaveRAF = 0; }
+    if (_finalsTimeRAF) { cancelAnimationFrame(_finalsTimeRAF); _finalsTimeRAF = 0; }
+    if (_finalsSource) { try { _finalsSource.disconnect(); } catch(e){} _finalsSource = null; }
+    _finalsAnalyser = null;
     if (_finalsPlayingAudio) {
         _finalsPlayingAudio.pause();
         _finalsPlayingAudio.src = '';
         const prevBtn = document.querySelector(`.final-play-btn[data-id="${_finalsPlayingId}"]`);
         if (prevBtn) prevBtn.textContent = '▶';
-        if (_finalsPlayingId === id) {
-            _finalsPlayingAudio = null;
-            _finalsPlayingId = null;
-            return;
-        }
+        const prevPlayer = document.getElementById(`finalPlayer_${_finalsPlayingId}`);
+        if (prevPlayer) prevPlayer.style.display = 'none';
+        _finalsPlayingAudio = null;
+        _finalsPlayingId = null;
     }
+}
+
+function _toggleFinalPlay(btn, id, url, dur) {
+    const wasSame = _finalsPlayingId === id;
+    _stopFinalsPlayback();
+    if (wasSame) return;
+
+    // 显示播放器行
+    const playerRow = document.getElementById(`finalPlayer_${id}`);
+    if (playerRow) playerRow.style.display = '';
+
     const fullUrl = _expBuildUrl(url);
     const audio = new Audio(fullUrl);
     audio.crossOrigin = 'anonymous';
+
+    // Web Audio 连接
+    const ctx = _getFinalsAudioCtx();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.75;
+
+    audio.addEventListener('canplay', () => {
+        if (_finalsPlayingId !== id) return;
+        try {
+            if (!_finalsSource) {
+                const src = ctx.createMediaElementSource(audio);
+                src.connect(analyser);
+                analyser.connect(ctx.destination);
+                _finalsSource = src;
+            }
+        } catch(e) {}
+    }, { once: true });
+
     audio.addEventListener('ended', () => {
-        btn.textContent = '▶';
-        _finalsPlayingAudio = null;
-        _finalsPlayingId = null;
+        _stopFinalsPlayback();
     });
+
     audio.play().catch(() => {});
     btn.textContent = '⏸';
     _finalsPlayingAudio = audio;
     _finalsPlayingId = id;
+    _finalsAnalyser = analyser;
+
+    // 波形绘制循环
+    const canvas = document.getElementById(`finalWave_${id}`);
+    if (canvas) {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const cCtx = canvas.getContext('2d');
+        cCtx.scale(dpr, dpr);
+        const W = rect.width, H = rect.height;
+        const bufLen = analyser.frequencyBinCount;
+        const dataArr = new Uint8Array(bufLen);
+
+        function drawWave() {
+            if (_finalsPlayingId !== id) return;
+            _finalsWaveRAF = requestAnimationFrame(drawWave);
+            analyser.getByteFrequencyData(dataArr);
+            cCtx.clearRect(0, 0, W, H);
+
+            const barCount = Math.min(bufLen, Math.floor(W / 3));
+            const barW = W / barCount;
+            const gap = 1;
+            for (let i = 0; i < barCount; i++) {
+                const v = dataArr[i] / 255;
+                const barH = Math.max(1, v * H * 0.9);
+                const x = i * barW;
+                const y = (H - barH) / 2;
+                const hue = 240 + v * 60;
+                cCtx.fillStyle = `hsla(${hue}, 80%, ${55 + v * 25}%, ${0.6 + v * 0.4})`;
+                cCtx.fillRect(x + gap / 2, y, barW - gap, barH);
+            }
+        }
+        drawWave();
+    }
+
+    // 时间更新循环
+    function tickTime() {
+        if (_finalsPlayingId !== id) return;
+        _finalsTimeRAF = requestAnimationFrame(tickTime);
+        const cur = audio.currentTime || 0;
+        const total = audio.duration || dur || 0;
+        const timeEl = document.getElementById(`finalTime_${id}`);
+        if (timeEl) timeEl.textContent = `${fmtTime(cur)} / ${fmtTime(total)}`;
+        const fillEl = document.getElementById(`finalFill_${id}`);
+        if (fillEl) fillEl.style.width = total ? (cur / total * 100) + '%' : '0%';
+    }
+    tickTime();
 }

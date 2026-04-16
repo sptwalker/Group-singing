@@ -67,11 +67,236 @@
             return;
         }
         try {
-            renderSong();
+            if (currentSong.published_final) {
+                renderPublishedView();
+            } else {
+                restoreTaskView();
+                renderSong();
+            }
             loadRecordings();
         } catch (e) {
             console.error('[task] renderSong error:', e);
             showToast('渲染失败：' + e.message);
+        }
+    }
+
+    // ===== 已发布成曲视图 =====
+    let _publishedAudio = null;
+    let _publishedRAF = 0;
+    let _publishedAudioCtx = null;
+    let _publishedAnalyser = null;
+    let _publishedSource = null;
+    let _publishedWaveRAF = 0;
+
+    function _getPublishedAudioCtx() {
+        if (!_publishedAudioCtx) _publishedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (_publishedAudioCtx.state === 'suspended') _publishedAudioCtx.resume();
+        return _publishedAudioCtx;
+    }
+
+    function _stopPublishedPlayback() {
+        if (_publishedRAF) { cancelAnimationFrame(_publishedRAF); _publishedRAF = 0; }
+        if (_publishedWaveRAF) { cancelAnimationFrame(_publishedWaveRAF); _publishedWaveRAF = 0; }
+        if (_publishedSource) { try { _publishedSource.disconnect(); } catch(e){} _publishedSource = null; }
+        _publishedAnalyser = null;
+        if (_publishedAudio) {
+            _publishedAudio.pause();
+            _publishedAudio.src = '';
+            _publishedAudio = null;
+        }
+    }
+
+    function renderPublishedView() {
+        _stopPublishedPlayback();
+        AudioManager.stop();
+        if (_visualizerWS) { try { _visualizerWS.destroy(); } catch(e){} _visualizerWS = null; }
+
+        const s = currentSong;
+        const pf = s.published_final;
+        songTitle.textContent = s.title;
+        songArtist.textContent = s.artist;
+
+        // 隐藏任务区的元素
+        document.querySelector('.lyrics-list-section').style.display = 'none';
+        document.querySelector('.header-stats').style.display = 'none';
+        document.querySelector('.play-controls').style.display = 'none';
+        navPrev.style.display = currentSongIndex > 0 ? '' : 'none';
+        navNext.style.display = currentSongIndex < songs.length - 1 ? '' : 'none';
+        btnPlayPause.style.display = 'none';
+        btnStop.style.display = 'none';
+
+        // 修改录音区标题
+        const recHeader = document.querySelector('.recordings-header');
+        if (recHeader) {
+            recHeader.querySelector('.recordings-title').textContent = '🎧 全部录音';
+            const sortTabs = recHeader.querySelector('.sort-tabs');
+            if (sortTabs) sortTabs.style.display = 'none';
+        }
+        // 强制按歌词顺序排列
+        sortMode = 'order';
+        focusSegId = null;
+
+        // 插入已发布成曲播放器
+        let playerSection = document.getElementById('publishedPlayerSection');
+        if (!playerSection) {
+            playerSection = document.createElement('div');
+            playerSection.id = 'publishedPlayerSection';
+            const taskHeader = document.querySelector('.task-header');
+            taskHeader.parentNode.insertBefore(playerSection, taskHeader.nextSibling);
+        }
+
+        const finalAudioUrl = `${API_BASE.replace('/api', '')}${pf.audio_url}`;
+        playerSection.innerHTML = `
+            <div class="published-banner">
+                <div class="published-badge">全曲已完成，请欣赏！</div>
+                <div class="published-player">
+                    <button class="published-play-btn" id="pubPlayBtn">▶</button>
+                    <div class="published-info-col">
+                        <canvas class="published-wave-canvas" id="pubWaveCanvas" width="800" height="44"></canvas>
+                        <div class="published-progress-row">
+                            <div class="published-progress-track" id="pubProgressTrack">
+                                <div class="published-progress-fill" id="pubProgressFill"></div>
+                            </div>
+                            <span class="published-time" id="pubTimeLabel">0:00 / ${formatTime(pf.duration || 0)}</span>
+                        </div>
+                    </div>
+                    <a class="published-download-btn" href="${finalAudioUrl}" download title="下载">⬇</a>
+                </div>
+            </div>`;
+
+        // 播放按钮事件
+        const pubPlayBtn = document.getElementById('pubPlayBtn');
+        const pubProgressTrack = document.getElementById('pubProgressTrack');
+
+        pubPlayBtn.addEventListener('click', () => {
+            if (_publishedAudio && !_publishedAudio.paused) {
+                _publishedAudio.pause();
+                pubPlayBtn.textContent = '▶';
+                pubPlayBtn.classList.remove('playing');
+                return;
+            }
+            if (_publishedAudio && _publishedAudio.paused && _publishedAudio.currentTime > 0) {
+                _publishedAudio.play();
+                pubPlayBtn.textContent = '⏸';
+                pubPlayBtn.classList.add('playing');
+                _startPublishedTick();
+                _startPublishedWave();
+                return;
+            }
+            // 新播放
+            _stopPublishedPlayback();
+            const audio = new Audio(finalAudioUrl);
+            audio.crossOrigin = 'anonymous';
+            _publishedAudio = audio;
+
+            const ctx = _getPublishedAudioCtx();
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.75;
+            _publishedAnalyser = analyser;
+
+            audio.addEventListener('canplay', () => {
+                if (!_publishedSource && _publishedAudio === audio) {
+                    try {
+                        const src = ctx.createMediaElementSource(audio);
+                        src.connect(analyser);
+                        analyser.connect(ctx.destination);
+                        _publishedSource = src;
+                    } catch(e) {}
+                }
+            }, { once: true });
+
+            audio.addEventListener('ended', () => {
+                pubPlayBtn.textContent = '▶';
+                pubPlayBtn.classList.remove('playing');
+                _stopPublishedPlayback();
+                const fill = document.getElementById('pubProgressFill');
+                if (fill) fill.style.width = '0%';
+                const tl = document.getElementById('pubTimeLabel');
+                if (tl) tl.textContent = `0:00 / ${formatTime(pf.duration || 0)}`;
+            });
+
+            audio.play().catch(() => {});
+            pubPlayBtn.textContent = '⏸';
+            pubPlayBtn.classList.add('playing');
+            _startPublishedTick();
+            _startPublishedWave();
+        });
+
+        // 进度条 seek
+        pubProgressTrack.addEventListener('click', (e) => {
+            if (!_publishedAudio) return;
+            const rect = pubProgressTrack.getBoundingClientRect();
+            const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            _publishedAudio.currentTime = ratio * (_publishedAudio.duration || pf.duration || 0);
+        });
+    }
+
+    function _startPublishedTick() {
+        function tick() {
+            if (!_publishedAudio) return;
+            _publishedRAF = requestAnimationFrame(tick);
+            const cur = _publishedAudio.currentTime || 0;
+            const dur = _publishedAudio.duration || 0;
+            const tl = document.getElementById('pubTimeLabel');
+            if (tl) tl.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+            const fill = document.getElementById('pubProgressFill');
+            if (fill) fill.style.width = dur ? (cur / dur * 100) + '%' : '0%';
+        }
+        tick();
+    }
+
+    function _startPublishedWave() {
+        const canvas = document.getElementById('pubWaveCanvas');
+        if (!canvas || !_publishedAnalyser) return;
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const cCtx = canvas.getContext('2d');
+        cCtx.scale(dpr, dpr);
+        const W = rect.width, H = rect.height;
+        const bufLen = _publishedAnalyser.frequencyBinCount;
+        const dataArr = new Uint8Array(bufLen);
+
+        function draw() {
+            if (!_publishedAudio || _publishedAudio.paused) return;
+            _publishedWaveRAF = requestAnimationFrame(draw);
+            _publishedAnalyser.getByteFrequencyData(dataArr);
+            cCtx.clearRect(0, 0, W, H);
+            const barCount = Math.min(bufLen, Math.floor(W / 3));
+            const barW = W / barCount;
+            for (let i = 0; i < barCount; i++) {
+                const v = dataArr[i] / 255;
+                const barH = Math.max(1, v * H * 0.9);
+                const x = i * barW;
+                const y = (H - barH) / 2;
+                const hue = 140 + v * 40;
+                cCtx.fillStyle = `hsla(${hue}, 70%, ${45 + v * 30}%, ${0.6 + v * 0.4})`;
+                cCtx.fillRect(x + 0.5, y, barW - 1, barH);
+            }
+        }
+        draw();
+    }
+
+    function restoreTaskView() {
+        _stopPublishedPlayback();
+        // 移除发布播放器
+        const playerSection = document.getElementById('publishedPlayerSection');
+        if (playerSection) playerSection.remove();
+        // 恢复任务区元素
+        document.querySelector('.lyrics-list-section').style.display = '';
+        document.querySelector('.header-stats').style.display = '';
+        document.querySelector('.play-controls').style.display = '';
+        btnPlayPause.style.display = '';
+        btnStop.style.display = '';
+        navPrev.style.display = '';
+        navNext.style.display = '';
+        const recHeader = document.querySelector('.recordings-header');
+        if (recHeader) {
+            recHeader.querySelector('.recordings-title').textContent = '🎧 大家的录音';
+            const sortTabs = recHeader.querySelector('.sort-tabs');
+            if (sortTabs) sortTabs.style.display = '';
         }
     }
 
@@ -362,6 +587,7 @@
 
     navPrev.addEventListener('click', () => {
         if (currentSongIndex > 0) {
+            _stopPublishedPlayback();
             AudioManager.stop();
             resetPlayButtons();
             isFullPlaying = false;
@@ -374,6 +600,7 @@
 
     navNext.addEventListener('click', () => {
         if (currentSongIndex < songs.length - 1) {
+            _stopPublishedPlayback();
             AudioManager.stop();
             resetPlayButtons();
             isFullPlaying = false;
