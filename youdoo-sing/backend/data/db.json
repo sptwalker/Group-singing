@@ -1,89 +1,105 @@
 {
   "songs": {
-    "5d436883": {
-      "id": "5d436883",
-      "title": "海阔天空",
-      "artist": "易烊千玺; 许君聪; 田雨; 王宁; 公磊; 黄尧; 齐溪",
-      "duration": 322.1,
-      "audio_url": "/api/uploads/5d436883.mp3",
-      "audio_file": "5d436883.mp3",
-      "original_filename": "易烊千玺; 许君聪; 田雨; 王宁; 公磊; 黄尧; 齐溪 - 海阔天空.mp3",
-      "segment_count": 32,
+    "320f9eae": {
+      "id": "320f9eae",
+      "title": "明天会更好(Live)(1)",
+      "artist": "胡德夫&张信哲&那英&莫文蔚&何炅&杨宗纬&阿雅&张韶涵&魏如萱&张杰&华晨宇&马嘉祺&告五人",
+      "duration": 315.48,
+      "audio_url": "/api/uploads/320f9eae.mp3",
+      "audio_file": "320f9eae.mp3",
+      "original_filename": "胡德夫&张信哲&那英&莫文蔚&何炅&杨宗纬&阿雅&张韶涵&魏如萱&张杰&华晨宇&马嘉祺&告五人-明天会更好(Live)(1).mp3",
+      "segment_count": 10,
       "participant_count": 1,
       "completion": 0.0,
       "segments": [
         {
-          "id": "5d436883-01",
-          "song_id": "5d436883",
+          "id": "320f9eae-a73ce8",
+          "song_id": "320f9eae",
           "index": 1,
-          "start_time": 0.0,
-          "end_time": 10.07,
-          "lyrics": "",
-          "difficulty": "easy",
+          "start_time": 27.18,
+          "end_time": 55.97,
+          "lyrics": "輕輕敲醒沉睡的心靈 慢慢張開你的眼睛\n看看忙碌的世界 是否依然孤獨的轉個不停\n春風不解風情 吹動少年的心\n讓昨日臉上的淚痕 隨記憶風乾了",
+          "difficulty": "normal",
+          "is_chorus": false,
+          "status": "claimed",
+          "claim_count": 1,
+          "submit_count": 1,
+          "claims": [
+            {
+              "id": "41133057",
+              "segment_id": "320f9eae-a73ce8",
+              "user_id": "284bdc4b",
+              "user_name": "微信用户5807",
+              "status": "claimed"
+            }
+          ]
+        },
+        {
+          "id": "320f9eae-c729a4",
+          "song_id": "320f9eae",
+          "index": 2,
+          "start_time": 55.97,
+          "end_time": 85.01,
+          "lyrics": "抬頭尋找天空的翅膀 候鳥出現它的影跡\n帶來遠處的飢荒 無情的戰火 依然存在的消息\n玉山白雪飄零 燃燒少年的心\n使真情溶化成音符 傾訴遙遠的祝福",
+          "difficulty": "normal",
+          "is_chorus": false,
+          "status": "claimed",
+          "claim_count": 1,
+          "submit_count": 1,
+          "claims": [
+            {
+              "id": "911d2cd3",
+              "segment_id": "320f9eae-c729a4",
+              "user_id": "284bdc4b",
+              "user_name": "微信用户5807",
+              "status": "claimed"
+            }
+          ]
+        },
+        {
+          "id": "320f9eae-e06573",
+          "song_id": "320f9eae",
+          "index": 3,
+          "start_time": 85.01,
+          "end_time": 118.34,
+          "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲\n為明天獻出虔誠的祈禱\n誰能不顧自己的家園 拋開記憶中的童年",
+          "difficulty": "normal",
+          "is_chorus": false,
+          "status": "unassigned",
+          "claim_count": 0,
+          "submit_count": 0,
+          "claims": []
+        },
+        {
+          "id": "320f9eae-4342eb",
+          "song_id": "320f9eae",
+          "index": 4,
+          "start_time": 118.34,
+          "end_time": 140.64,
+          "lyrics": "誰能忍心看那昨日的憂愁帶走我們的笑容\n青春不解紅塵 胭脂沾染了灰\n讓久違不見的淚水 滋潤了你的面容",
+          "difficulty": "normal",
           "is_chorus": false,
           "status": "claimed",
           "claim_count": 1,
           "submit_count": 0,
           "claims": [
             {
-              "id": "cc491c89",
-              "segment_id": "5d436883-01",
-              "user_id": "75867038",
-              "user_name": "微信用户8398",
+              "id": "7d33f3a5",
+              "segment_id": "320f9eae-4342eb",
+              "user_id": "284bdc4b",
+              "user_name": "微信用户5807",
               "status": "claimed"
             }
           ]
         },
         {
-          "id": "5d436883-02",
-          "song_id": "5d436883",
-          "index": 2,
-          "start_time": 10.07,
-          "end_time": 20.13,
-          "lyrics": "今天我寒夜里看雪飘过",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-03",
-          "song_id": "5d436883",
-          "index": 3,
-          "start_time": 20.13,
-          "end_time": 30.2,
-          "lyrics": "怀着冷却了的心窝飘远方",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-04",
-          "song_id": "5d436883",
-          "index": 4,
-          "start_time": 30.2,
-          "end_time": 40.26,
-          "lyrics": "风雨里追赶 雾里分不清影踪\n天空海阔你与我 可会变 （谁没在变？）",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-05",
-          "song_id": "5d436883",
+          "id": "320f9eae-06feaa",
+          "song_id": "320f9eae",
           "index": 5,
-          "start_time": 40.26,
-          "end_time": 50.33,
-          "lyrics": "多少次迎着冷眼与嘲笑",
-          "difficulty": "easy",
+          "start_time": 140.64,
+          "end_time": 174.25,
+          "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲\n為明天獻出虔誠的祈禱\n輕輕敲醒沉睡的心靈 慢慢張開你的眼睛",
+          "difficulty": "normal",
           "is_chorus": false,
           "status": "unassigned",
           "claim_count": 0,
@@ -91,12 +107,12 @@
           "claims": []
         },
         {
-          "id": "5d436883-06",
-          "song_id": "5d436883",
+          "id": "320f9eae-c67250",
+          "song_id": "320f9eae",
           "index": 6,
-          "start_time": 50.33,
-          "end_time": 60.39,
-          "lyrics": "从没有放弃过心中的理想\n一刹那恍惚 若有所失的感觉",
+          "start_time": 174.25,
+          "end_time": 196.65,
+          "lyrics": "看那忙碌的世界 是否依然孤獨的轉個不停\n日出喚醒清晨 大地光彩重生\n讓和風拂出的音響 譜成生命的樂章",
           "difficulty": "normal",
           "is_chorus": false,
           "status": "unassigned",
@@ -105,518 +121,34 @@
           "claims": []
         },
         {
-          "id": "5d436883-07",
-          "song_id": "5d436883",
+          "id": "320f9eae-d9b8af",
+          "song_id": "320f9eae",
           "index": 7,
-          "start_time": 60.39,
-          "end_time": 70.46,
-          "lyrics": "不知不觉已变淡 心里爱 （谁明白我？）\n原谅我这一生不羁放纵爱自由",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
+          "start_time": 196.65,
+          "end_time": 223.6,
+          "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲\n讓我們期待明天會更好",
+          "difficulty": "hard",
+          "is_chorus": true,
+          "status": "claimed",
+          "claim_count": 1,
+          "submit_count": 1,
+          "claims": [
+            {
+              "id": "56c144c8",
+              "segment_id": "320f9eae-d9b8af",
+              "user_id": "284bdc4b",
+              "user_name": "微信用户5807",
+              "status": "claimed"
+            }
+          ]
         },
         {
-          "id": "5d436883-08",
-          "song_id": "5d436883",
+          "id": "320f9eae-844ce3",
+          "song_id": "320f9eae",
           "index": 8,
-          "start_time": 70.46,
-          "end_time": 80.53,
-          "lyrics": "也会怕有一天会跌倒",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-09",
-          "song_id": "5d436883",
-          "index": 9,
-          "start_time": 80.53,
-          "end_time": 90.59,
-          "lyrics": "背弃了理想谁人都可以\n哪会怕有一天只你共我",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-10",
-          "song_id": "5d436883",
-          "index": 10,
-          "start_time": 90.59,
-          "end_time": 100.66,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-11",
-          "song_id": "5d436883",
-          "index": 11,
-          "start_time": 100.66,
-          "end_time": 110.72,
-          "lyrics": "今天我寒夜里看雪飘过",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-12",
-          "song_id": "5d436883",
-          "index": 12,
-          "start_time": 110.72,
-          "end_time": 120.79,
-          "lyrics": "怀着冷却了的心窝飘远方\n风雨里追赶 雾里分不清影踪",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-13",
-          "song_id": "5d436883",
-          "index": 13,
-          "start_time": 120.79,
-          "end_time": 130.85,
-          "lyrics": "天空海阔你与我 可会变 （谁没在变？）\n原谅我这一生不羁放纵爱自由",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-14",
-          "song_id": "5d436883",
-          "index": 14,
-          "start_time": 130.85,
-          "end_time": 140.92,
-          "lyrics": "也会怕有一天会跌倒",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-15",
-          "song_id": "5d436883",
-          "index": 15,
-          "start_time": 140.92,
-          "end_time": 150.98,
-          "lyrics": "背弃了理想谁人都可以\n哪会怕有一天只你共我",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-16",
-          "song_id": "5d436883",
-          "index": 16,
-          "start_time": 150.98,
-          "end_time": 161.05,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-17",
-          "song_id": "5d436883",
-          "index": 17,
-          "start_time": 161.05,
-          "end_time": 171.12,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-18",
-          "song_id": "5d436883",
-          "index": 18,
-          "start_time": 171.12,
-          "end_time": 181.18,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-19",
-          "song_id": "5d436883",
-          "index": 19,
-          "start_time": 181.18,
-          "end_time": 191.25,
-          "lyrics": "仍然自由自我 永远高唱我歌",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-20",
-          "song_id": "5d436883",
-          "index": 20,
-          "start_time": 191.25,
-          "end_time": 201.31,
-          "lyrics": "走遍千里",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-21",
-          "song_id": "5d436883",
-          "index": 21,
-          "start_time": 201.31,
-          "end_time": 211.38,
-          "lyrics": "原谅我这一生不羁放纵爱自由\n也会怕有一天会跌倒",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-22",
-          "song_id": "5d436883",
-          "index": 22,
-          "start_time": 211.38,
-          "end_time": 221.44,
-          "lyrics": "背弃了理想谁人都可以\n哪会怕有一天只你共我",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-23",
-          "song_id": "5d436883",
-          "index": 23,
-          "start_time": 221.44,
-          "end_time": 231.51,
-          "lyrics": "背弃了理想谁人都可以",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-24",
-          "song_id": "5d436883",
-          "index": 24,
-          "start_time": 231.51,
-          "end_time": 241.58,
-          "lyrics": "哪会怕有一天只你共我\n原谅我这一生不羁放纵爱自由",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-25",
-          "song_id": "5d436883",
-          "index": 25,
-          "start_time": 241.58,
-          "end_time": 251.64,
-          "lyrics": "也会怕有一天会跌倒",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-26",
-          "song_id": "5d436883",
-          "index": 26,
-          "start_time": 251.64,
-          "end_time": 261.71,
-          "lyrics": "背弃了理想谁人都可以\n哪会怕有一天只你共我",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-27",
-          "song_id": "5d436883",
-          "index": 27,
-          "start_time": 261.71,
-          "end_time": 271.77,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-28",
-          "song_id": "5d436883",
-          "index": 28,
-          "start_time": 271.77,
-          "end_time": 281.84,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-29",
-          "song_id": "5d436883",
-          "index": 29,
-          "start_time": 281.84,
-          "end_time": 291.9,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-30",
-          "song_id": "5d436883",
-          "index": 30,
-          "start_time": 291.9,
-          "end_time": 301.97,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-31",
-          "song_id": "5d436883",
-          "index": 31,
-          "start_time": 301.97,
-          "end_time": 312.03,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "5d436883-32",
-          "song_id": "5d436883",
-          "index": 32,
-          "start_time": 312.03,
-          "end_time": 322.1,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        }
-      ],
-      "has_lyrics": true,
-      "created_at": "2026-04-16 02:10:02"
-    },
-    "09d66a4f": {
-      "id": "09d66a4f",
-      "title": "明天会更好",
-      "artist": "",
-      "duration": 324.17,
-      "audio_url": "/api/uploads/09d66a4f.mp3",
-      "audio_file": "09d66a4f.mp3",
-      "original_filename": "明天会更好.mp3",
-      "segment_count": 32,
-      "participant_count": 0,
-      "completion": 0.0,
-      "segments": [
-        {
-          "id": "09d66a4f-01",
-          "song_id": "09d66a4f",
-          "index": 1,
-          "start_time": 0.0,
-          "end_time": 10.13,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-02",
-          "song_id": "09d66a4f",
-          "index": 2,
-          "start_time": 10.13,
-          "end_time": 20.26,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-03",
-          "song_id": "09d66a4f",
-          "index": 3,
-          "start_time": 20.26,
-          "end_time": 30.39,
-          "lyrics": "輕輕敲醒沉睡的心靈 慢慢張開你的眼睛",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-04",
-          "song_id": "09d66a4f",
-          "index": 4,
-          "start_time": 30.39,
-          "end_time": 40.52,
-          "lyrics": "看看忙碌的世界 是否依然孤獨的轉個不停",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-05",
-          "song_id": "09d66a4f",
-          "index": 5,
-          "start_time": 40.52,
-          "end_time": 50.65,
-          "lyrics": "春風不解風情 吹動少年的心\n讓昨日臉上的淚痕 隨記憶風乾了",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-06",
-          "song_id": "09d66a4f",
-          "index": 6,
-          "start_time": 50.65,
-          "end_time": 60.78,
-          "lyrics": "抬頭尋找天空的翅膀 候鳥出現它的影跡",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-07",
-          "song_id": "09d66a4f",
-          "index": 7,
-          "start_time": 60.78,
-          "end_time": 70.91,
-          "lyrics": "帶來遠處的飢荒 無情的戰火 依然存在的消息\n玉山白雪飄零 燃燒少年的心",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-08",
-          "song_id": "09d66a4f",
-          "index": 8,
-          "start_time": 70.91,
-          "end_time": 81.04,
-          "lyrics": "使真情溶化成音符 傾訴遙遠的祝福",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-09",
-          "song_id": "09d66a4f",
-          "index": 9,
-          "start_time": 81.04,
-          "end_time": 91.17,
-          "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-10",
-          "song_id": "09d66a4f",
-          "index": 10,
-          "start_time": 91.17,
-          "end_time": 101.3,
-          "lyrics": "讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲",
+          "start_time": 223.6,
+          "end_time": 250.78,
+          "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲\n讓我們期待明天會更好",
           "difficulty": "hard",
           "is_chorus": true,
           "status": "unassigned",
@@ -625,152 +157,12 @@
           "claims": []
         },
         {
-          "id": "09d66a4f-11",
-          "song_id": "09d66a4f",
-          "index": 11,
-          "start_time": 101.3,
-          "end_time": 111.43,
-          "lyrics": "為明天獻出虔誠的祈禱",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-12",
-          "song_id": "09d66a4f",
-          "index": 12,
-          "start_time": 111.43,
-          "end_time": 121.56,
-          "lyrics": "誰能不顧自己的家園 拋開記憶中的童年\n誰能忍心看那昨日的憂愁帶走我們的笑容",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-13",
-          "song_id": "09d66a4f",
-          "index": 13,
-          "start_time": 121.56,
-          "end_time": 131.69,
-          "lyrics": "青春不解紅塵 胭脂沾染了灰",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-14",
-          "song_id": "09d66a4f",
-          "index": 14,
-          "start_time": 131.69,
-          "end_time": 141.82,
-          "lyrics": "讓久違不見的淚水 滋潤了你的面容\n唱出你的熱情 伸出你雙手",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-15",
-          "song_id": "09d66a4f",
-          "index": 15,
-          "start_time": 141.82,
-          "end_time": 151.95,
-          "lyrics": "讓我擁抱著你的夢\n讓我擁有你真心的面孔",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-16",
-          "song_id": "09d66a4f",
-          "index": 16,
-          "start_time": 151.95,
-          "end_time": 162.09,
-          "lyrics": "讓我們的笑容 充滿著青春的驕傲\n為明天獻出虔誠的祈禱",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-17",
-          "song_id": "09d66a4f",
-          "index": 17,
-          "start_time": 162.09,
-          "end_time": 172.22,
-          "lyrics": "輕輕敲醒沉睡的心靈 慢慢張開你的眼睛",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-18",
-          "song_id": "09d66a4f",
-          "index": 18,
-          "start_time": 172.22,
-          "end_time": 182.35,
-          "lyrics": "看那忙碌的世界 是否依然孤獨的轉個不停\n日出喚醒清晨 大地光彩重生",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-19",
-          "song_id": "09d66a4f",
-          "index": 19,
-          "start_time": 182.35,
-          "end_time": 192.48,
-          "lyrics": "讓和風拂出的音響 譜成生命的樂章",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-20",
-          "song_id": "09d66a4f",
-          "index": 20,
-          "start_time": 192.48,
-          "end_time": 202.61,
-          "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-21",
-          "song_id": "09d66a4f",
-          "index": 21,
-          "start_time": 202.61,
-          "end_time": 212.74,
-          "lyrics": "讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲",
+          "id": "320f9eae-19db9d",
+          "song_id": "320f9eae",
+          "index": 9,
+          "start_time": 250.78,
+          "end_time": 277.46,
+          "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲\n讓我們期待明天會更好",
           "difficulty": "hard",
           "is_chorus": true,
           "status": "unassigned",
@@ -779,536 +171,129 @@
           "claims": []
         },
         {
-          "id": "09d66a4f-22",
-          "song_id": "09d66a4f",
-          "index": 22,
-          "start_time": 212.74,
-          "end_time": 222.87,
-          "lyrics": "讓我們期待明天會更好",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-23",
-          "song_id": "09d66a4f",
-          "index": 23,
-          "start_time": 222.87,
-          "end_time": 233.0,
-          "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-24",
-          "song_id": "09d66a4f",
-          "index": 24,
-          "start_time": 233.0,
-          "end_time": 243.13,
-          "lyrics": "讓我們的笑容 充滿著青春的驕傲",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-25",
-          "song_id": "09d66a4f",
-          "index": 25,
-          "start_time": 243.13,
-          "end_time": 253.26,
-          "lyrics": "讓我們期待明天會更好\n唱出你的熱情 伸出你雙手",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-26",
-          "song_id": "09d66a4f",
-          "index": 26,
-          "start_time": 253.26,
-          "end_time": 263.39,
-          "lyrics": "讓我擁抱著你的夢\n讓我擁有你真心的面孔",
-          "difficulty": "normal",
-          "is_chorus": true,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-27",
-          "song_id": "09d66a4f",
-          "index": 27,
-          "start_time": 263.39,
-          "end_time": 273.52,
-          "lyrics": "讓我們的笑容 充滿著青春的驕傲\n讓我們期待明天會更好",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-28",
-          "song_id": "09d66a4f",
-          "index": 28,
-          "start_time": 273.52,
-          "end_time": 283.65,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-29",
-          "song_id": "09d66a4f",
-          "index": 29,
-          "start_time": 283.65,
-          "end_time": 293.78,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-30",
-          "song_id": "09d66a4f",
-          "index": 30,
-          "start_time": 293.78,
-          "end_time": 303.91,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-31",
-          "song_id": "09d66a4f",
-          "index": 31,
-          "start_time": 303.91,
-          "end_time": 314.04,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        },
-        {
-          "id": "09d66a4f-32",
-          "song_id": "09d66a4f",
-          "index": 32,
-          "start_time": 314.04,
-          "end_time": 324.17,
-          "lyrics": "",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "unassigned",
-          "claim_count": 0,
-          "submit_count": 0,
-          "claims": []
-        }
-      ],
-      "has_lyrics": true,
-      "created_at": "2026-04-16 22:45:31",
-      "accompaniment_url": "/api/uploads/acc_09d66a4f.mp3",
-      "accompaniment_file": "acc_09d66a4f.mp3",
-      "accompaniment_duration": 324.17
-    },
-    "7e9bf575": {
-      "id": "7e9bf575",
-      "title": "世界赠予我的",
-      "artist": "王菲",
-      "duration": 244.28,
-      "audio_url": "/api/uploads/7e9bf575.mp3",
-      "audio_file": "7e9bf575.mp3",
-      "original_filename": "王菲 - 世界赠予我的.mp3",
-      "segment_count": 12,
-      "participant_count": 1,
-      "completion": 100.0,
-      "segments": [
-        {
-          "id": "7e9bf575-137208",
-          "song_id": "7e9bf575",
-          "index": 1,
-          "start_time": 25.5,
-          "end_time": 49.1,
-          "lyrics": "有人放烟花  有人追晚风\n借一缕时光  捧一片星空\n停一停 等一等 别匆匆",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 2,
-          "claims": [
-            {
-              "id": "8482722d",
-              "segment_id": "7e9bf575-137208",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
-        },
-        {
-          "id": "7e9bf575-366b25",
-          "song_id": "7e9bf575",
-          "index": 2,
-          "start_time": 49.1,
-          "end_time": 62,
-          "lyrics": "造梦者造了好梦 值得我称颂",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 1,
-          "claims": [
-            {
-              "id": "058433d0",
-              "segment_id": "7e9bf575-366b25",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
-        },
-        {
-          "id": "7e9bf575-014b3b",
-          "song_id": "7e9bf575",
-          "index": 3,
-          "start_time": 62,
-          "end_time": 71.4,
-          "lyrics": "世界赠予我虫鸣 也赠予我雷霆",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 1,
-          "claims": [
-            {
-              "id": "e65b532f",
-              "segment_id": "7e9bf575-014b3b",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
-        },
-        {
-          "id": "7e9bf575-90432d",
-          "song_id": "7e9bf575",
-          "index": 4,
-          "start_time": 71.4,
-          "end_time": 79.6,
-          "lyrics": "赠我弯弯一枚月 也赠予我晚星",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 1,
-          "claims": [
-            {
-              "id": "4c43939b",
-              "segment_id": "7e9bf575-90432d",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
-        },
-        {
-          "id": "7e9bf575-ea1e99",
-          "song_id": "7e9bf575",
-          "index": 5,
-          "start_time": 79.6,
-          "end_time": 98.9,
-          "lyrics": "赠我一场病 又慢慢痊愈摇风铃\n赠我一场空 又渐渐填满真感情",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 1,
-          "claims": [
-            {
-              "id": "e9816465",
-              "segment_id": "7e9bf575-ea1e99",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
-        },
-        {
-          "id": "7e9bf575-c217f8",
-          "song_id": "7e9bf575",
-          "index": 6,
-          "start_time": 114.3,
-          "end_time": 138.2,
-          "lyrics": "有人唱情歌 有人听晚钟\n借一丝懵懂 惊一片翻涌\n追一追 赶一赶 情正浓",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 1,
-          "claims": [
-            {
-              "id": "fdb38199",
-              "segment_id": "7e9bf575-c217f8",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
-        },
-        {
-          "id": "7e9bf575-d4c29c",
-          "song_id": "7e9bf575",
-          "index": 7,
-          "start_time": 138.2,
-          "end_time": 147.3,
-          "lyrics": "好故事眷顾好人 天赐的恩宠",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 1,
-          "claims": [
-            {
-              "id": "6391a480",
-              "segment_id": "7e9bf575-d4c29c",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
-        },
-        {
-          "id": "7e9bf575-209057",
-          "song_id": "7e9bf575",
-          "index": 8,
-          "start_time": 147.3,
-          "end_time": 156.5,
-          "lyrics": "世界赠予我拥有 也赠予我回敬",
-          "difficulty": "easy",
-          "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 1,
-          "claims": [
-            {
-              "id": "5bfedc56",
-              "segment_id": "7e9bf575-209057",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
-        },
-        {
-          "id": "7e9bf575-1a666f",
-          "song_id": "7e9bf575",
-          "index": 9,
-          "start_time": 156.5,
-          "end_time": 164.9,
-          "lyrics": "赠我小小一扇窗 也赠予我屋顶",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 1,
-          "claims": [
-            {
-              "id": "c60c9ee6",
-              "segment_id": "7e9bf575-1a666f",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
-        },
-        {
-          "id": "7e9bf575-f5a9af",
-          "song_id": "7e9bf575",
+          "id": "320f9eae-de2537",
+          "song_id": "320f9eae",
           "index": 10,
-          "start_time": 164.9,
-          "end_time": 184.1,
-          "lyrics": "赠我一个名 又渐渐长大的年龄\n赠我一首诗 又悄悄读得很安静",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 1,
-          "claims": [
-            {
-              "id": "d7bdc8ee",
-              "segment_id": "7e9bf575-f5a9af",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
-        },
-        {
-          "id": "7e9bf575-cb1935",
-          "song_id": "7e9bf575",
-          "index": 11,
-          "start_time": 184.1,
-          "end_time": 199.4,
-          "lyrics": "有人要回望 有人要憧憬 借一朵白云 拍一张合影",
+          "start_time": 277.46,
+          "end_time": 315.48,
+          "lyrics": "",
           "difficulty": "easy",
           "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 1,
-          "claims": [
-            {
-              "id": "01db19f2",
-              "segment_id": "7e9bf575-cb1935",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
-        },
-        {
-          "id": "7e9bf575-a7da5d",
-          "song_id": "7e9bf575",
-          "index": 12,
-          "start_time": 199.4,
-          "end_time": 221.1,
-          "lyrics": "想一想问自己莫打听 远去者去了远方 愿他都安心",
-          "difficulty": "normal",
-          "is_chorus": false,
-          "status": "completed",
-          "claim_count": 1,
-          "submit_count": 1,
-          "claims": [
-            {
-              "id": "35c59ed2",
-              "segment_id": "7e9bf575-a7da5d",
-              "user_id": "1dbb597c",
-              "user_name": "微信用户3773",
-              "status": "claimed"
-            }
-          ]
+          "status": "unassigned",
+          "claim_count": 0,
+          "submit_count": 0,
+          "claims": []
         }
       ],
       "has_lyrics": true,
-      "created_at": "2026-04-17 00:34:28",
-      "accompaniment_url": "/api/uploads/acc_7e9bf575.mp3",
-      "accompaniment_file": "acc_7e9bf575.mp3",
-      "accompaniment_duration": 242.74
+      "created_at": "2026-04-17 09:13:53",
+      "accompaniment_url": "/api/uploads/acc_320f9eae.mp3",
+      "accompaniment_file": "acc_320f9eae.mp3",
+      "accompaniment_duration": 317.43
     }
   },
   "segments": {
-    "5d436883-01": {
-      "id": "5d436883-01",
-      "song_id": "5d436883",
+    "320f9eae-a73ce8": {
+      "id": "320f9eae-a73ce8",
+      "song_id": "320f9eae",
       "index": 1,
-      "start_time": 0.0,
-      "end_time": 10.07,
-      "lyrics": "",
-      "difficulty": "easy",
+      "start_time": 27.18,
+      "end_time": 55.97,
+      "lyrics": "輕輕敲醒沉睡的心靈 慢慢張開你的眼睛\n看看忙碌的世界 是否依然孤獨的轉個不停\n春風不解風情 吹動少年的心\n讓昨日臉上的淚痕 隨記憶風乾了",
+      "difficulty": "normal",
+      "is_chorus": false,
+      "status": "claimed",
+      "claim_count": 1,
+      "submit_count": 1,
+      "claims": [
+        {
+          "id": "41133057",
+          "segment_id": "320f9eae-a73ce8",
+          "user_id": "284bdc4b",
+          "user_name": "微信用户5807",
+          "status": "claimed"
+        }
+      ]
+    },
+    "320f9eae-c729a4": {
+      "id": "320f9eae-c729a4",
+      "song_id": "320f9eae",
+      "index": 2,
+      "start_time": 55.97,
+      "end_time": 85.01,
+      "lyrics": "抬頭尋找天空的翅膀 候鳥出現它的影跡\n帶來遠處的飢荒 無情的戰火 依然存在的消息\n玉山白雪飄零 燃燒少年的心\n使真情溶化成音符 傾訴遙遠的祝福",
+      "difficulty": "normal",
+      "is_chorus": false,
+      "status": "claimed",
+      "claim_count": 1,
+      "submit_count": 1,
+      "claims": [
+        {
+          "id": "911d2cd3",
+          "segment_id": "320f9eae-c729a4",
+          "user_id": "284bdc4b",
+          "user_name": "微信用户5807",
+          "status": "claimed"
+        }
+      ]
+    },
+    "320f9eae-e06573": {
+      "id": "320f9eae-e06573",
+      "song_id": "320f9eae",
+      "index": 3,
+      "start_time": 85.01,
+      "end_time": 118.34,
+      "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲\n為明天獻出虔誠的祈禱\n誰能不顧自己的家園 拋開記憶中的童年",
+      "difficulty": "normal",
+      "is_chorus": false,
+      "status": "unassigned",
+      "claim_count": 0,
+      "submit_count": 0,
+      "claims": []
+    },
+    "320f9eae-4342eb": {
+      "id": "320f9eae-4342eb",
+      "song_id": "320f9eae",
+      "index": 4,
+      "start_time": 118.34,
+      "end_time": 140.64,
+      "lyrics": "誰能忍心看那昨日的憂愁帶走我們的笑容\n青春不解紅塵 胭脂沾染了灰\n讓久違不見的淚水 滋潤了你的面容",
+      "difficulty": "normal",
       "is_chorus": false,
       "status": "claimed",
       "claim_count": 1,
       "submit_count": 0,
       "claims": [
         {
-          "id": "cc491c89",
-          "segment_id": "5d436883-01",
-          "user_id": "75867038",
-          "user_name": "微信用户8398",
+          "id": "7d33f3a5",
+          "segment_id": "320f9eae-4342eb",
+          "user_id": "284bdc4b",
+          "user_name": "微信用户5807",
           "status": "claimed"
         }
       ]
     },
-    "5d436883-02": {
-      "id": "5d436883-02",
-      "song_id": "5d436883",
-      "index": 2,
-      "start_time": 10.07,
-      "end_time": 20.13,
-      "lyrics": "今天我寒夜里看雪飘过",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-03": {
-      "id": "5d436883-03",
-      "song_id": "5d436883",
-      "index": 3,
-      "start_time": 20.13,
-      "end_time": 30.2,
-      "lyrics": "怀着冷却了的心窝飘远方",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-04": {
-      "id": "5d436883-04",
-      "song_id": "5d436883",
-      "index": 4,
-      "start_time": 30.2,
-      "end_time": 40.26,
-      "lyrics": "风雨里追赶 雾里分不清影踪\n天空海阔你与我 可会变 （谁没在变？）",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-05": {
-      "id": "5d436883-05",
-      "song_id": "5d436883",
+    "320f9eae-06feaa": {
+      "id": "320f9eae-06feaa",
+      "song_id": "320f9eae",
       "index": 5,
-      "start_time": 40.26,
-      "end_time": 50.33,
-      "lyrics": "多少次迎着冷眼与嘲笑",
-      "difficulty": "easy",
+      "start_time": 140.64,
+      "end_time": 174.25,
+      "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲\n為明天獻出虔誠的祈禱\n輕輕敲醒沉睡的心靈 慢慢張開你的眼睛",
+      "difficulty": "normal",
       "is_chorus": false,
       "status": "unassigned",
       "claim_count": 0,
       "submit_count": 0,
       "claims": []
     },
-    "5d436883-06": {
-      "id": "5d436883-06",
-      "song_id": "5d436883",
+    "320f9eae-c67250": {
+      "id": "320f9eae-c67250",
+      "song_id": "320f9eae",
       "index": 6,
-      "start_time": 50.33,
-      "end_time": 60.39,
-      "lyrics": "从没有放弃过心中的理想\n一刹那恍惚 若有所失的感觉",
+      "start_time": 174.25,
+      "end_time": 196.65,
+      "lyrics": "看那忙碌的世界 是否依然孤獨的轉個不停\n日出喚醒清晨 大地光彩重生\n讓和風拂出的音響 譜成生命的樂章",
       "difficulty": "normal",
       "is_chorus": false,
       "status": "unassigned",
@@ -1316,503 +301,35 @@
       "submit_count": 0,
       "claims": []
     },
-    "5d436883-07": {
-      "id": "5d436883-07",
-      "song_id": "5d436883",
+    "320f9eae-d9b8af": {
+      "id": "320f9eae-d9b8af",
+      "song_id": "320f9eae",
       "index": 7,
-      "start_time": 60.39,
-      "end_time": 70.46,
-      "lyrics": "不知不觉已变淡 心里爱 （谁明白我？）\n原谅我这一生不羁放纵爱自由",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
+      "start_time": 196.65,
+      "end_time": 223.6,
+      "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲\n讓我們期待明天會更好",
+      "difficulty": "hard",
+      "is_chorus": true,
+      "status": "claimed",
+      "claim_count": 1,
+      "submit_count": 1,
+      "claims": [
+        {
+          "id": "56c144c8",
+          "segment_id": "320f9eae-d9b8af",
+          "user_id": "284bdc4b",
+          "user_name": "微信用户5807",
+          "status": "claimed"
+        }
+      ]
     },
-    "5d436883-08": {
-      "id": "5d436883-08",
-      "song_id": "5d436883",
+    "320f9eae-844ce3": {
+      "id": "320f9eae-844ce3",
+      "song_id": "320f9eae",
       "index": 8,
-      "start_time": 70.46,
-      "end_time": 80.53,
-      "lyrics": "也会怕有一天会跌倒",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-09": {
-      "id": "5d436883-09",
-      "song_id": "5d436883",
-      "index": 9,
-      "start_time": 80.53,
-      "end_time": 90.59,
-      "lyrics": "背弃了理想谁人都可以\n哪会怕有一天只你共我",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-10": {
-      "id": "5d436883-10",
-      "song_id": "5d436883",
-      "index": 10,
-      "start_time": 90.59,
-      "end_time": 100.66,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-11": {
-      "id": "5d436883-11",
-      "song_id": "5d436883",
-      "index": 11,
-      "start_time": 100.66,
-      "end_time": 110.72,
-      "lyrics": "今天我寒夜里看雪飘过",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-12": {
-      "id": "5d436883-12",
-      "song_id": "5d436883",
-      "index": 12,
-      "start_time": 110.72,
-      "end_time": 120.79,
-      "lyrics": "怀着冷却了的心窝飘远方\n风雨里追赶 雾里分不清影踪",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-13": {
-      "id": "5d436883-13",
-      "song_id": "5d436883",
-      "index": 13,
-      "start_time": 120.79,
-      "end_time": 130.85,
-      "lyrics": "天空海阔你与我 可会变 （谁没在变？）\n原谅我这一生不羁放纵爱自由",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-14": {
-      "id": "5d436883-14",
-      "song_id": "5d436883",
-      "index": 14,
-      "start_time": 130.85,
-      "end_time": 140.92,
-      "lyrics": "也会怕有一天会跌倒",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-15": {
-      "id": "5d436883-15",
-      "song_id": "5d436883",
-      "index": 15,
-      "start_time": 140.92,
-      "end_time": 150.98,
-      "lyrics": "背弃了理想谁人都可以\n哪会怕有一天只你共我",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-16": {
-      "id": "5d436883-16",
-      "song_id": "5d436883",
-      "index": 16,
-      "start_time": 150.98,
-      "end_time": 161.05,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-17": {
-      "id": "5d436883-17",
-      "song_id": "5d436883",
-      "index": 17,
-      "start_time": 161.05,
-      "end_time": 171.12,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-18": {
-      "id": "5d436883-18",
-      "song_id": "5d436883",
-      "index": 18,
-      "start_time": 171.12,
-      "end_time": 181.18,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-19": {
-      "id": "5d436883-19",
-      "song_id": "5d436883",
-      "index": 19,
-      "start_time": 181.18,
-      "end_time": 191.25,
-      "lyrics": "仍然自由自我 永远高唱我歌",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-20": {
-      "id": "5d436883-20",
-      "song_id": "5d436883",
-      "index": 20,
-      "start_time": 191.25,
-      "end_time": 201.31,
-      "lyrics": "走遍千里",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-21": {
-      "id": "5d436883-21",
-      "song_id": "5d436883",
-      "index": 21,
-      "start_time": 201.31,
-      "end_time": 211.38,
-      "lyrics": "原谅我这一生不羁放纵爱自由\n也会怕有一天会跌倒",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-22": {
-      "id": "5d436883-22",
-      "song_id": "5d436883",
-      "index": 22,
-      "start_time": 211.38,
-      "end_time": 221.44,
-      "lyrics": "背弃了理想谁人都可以\n哪会怕有一天只你共我",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-23": {
-      "id": "5d436883-23",
-      "song_id": "5d436883",
-      "index": 23,
-      "start_time": 221.44,
-      "end_time": 231.51,
-      "lyrics": "背弃了理想谁人都可以",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-24": {
-      "id": "5d436883-24",
-      "song_id": "5d436883",
-      "index": 24,
-      "start_time": 231.51,
-      "end_time": 241.58,
-      "lyrics": "哪会怕有一天只你共我\n原谅我这一生不羁放纵爱自由",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-25": {
-      "id": "5d436883-25",
-      "song_id": "5d436883",
-      "index": 25,
-      "start_time": 241.58,
-      "end_time": 251.64,
-      "lyrics": "也会怕有一天会跌倒",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-26": {
-      "id": "5d436883-26",
-      "song_id": "5d436883",
-      "index": 26,
-      "start_time": 251.64,
-      "end_time": 261.71,
-      "lyrics": "背弃了理想谁人都可以\n哪会怕有一天只你共我",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-27": {
-      "id": "5d436883-27",
-      "song_id": "5d436883",
-      "index": 27,
-      "start_time": 261.71,
-      "end_time": 271.77,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-28": {
-      "id": "5d436883-28",
-      "song_id": "5d436883",
-      "index": 28,
-      "start_time": 271.77,
-      "end_time": 281.84,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-29": {
-      "id": "5d436883-29",
-      "song_id": "5d436883",
-      "index": 29,
-      "start_time": 281.84,
-      "end_time": 291.9,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-30": {
-      "id": "5d436883-30",
-      "song_id": "5d436883",
-      "index": 30,
-      "start_time": 291.9,
-      "end_time": 301.97,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-31": {
-      "id": "5d436883-31",
-      "song_id": "5d436883",
-      "index": 31,
-      "start_time": 301.97,
-      "end_time": 312.03,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "5d436883-32": {
-      "id": "5d436883-32",
-      "song_id": "5d436883",
-      "index": 32,
-      "start_time": 312.03,
-      "end_time": 322.1,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-01": {
-      "id": "09d66a4f-01",
-      "song_id": "09d66a4f",
-      "index": 1,
-      "start_time": 0.0,
-      "end_time": 10.13,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-02": {
-      "id": "09d66a4f-02",
-      "song_id": "09d66a4f",
-      "index": 2,
-      "start_time": 10.13,
-      "end_time": 20.26,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-03": {
-      "id": "09d66a4f-03",
-      "song_id": "09d66a4f",
-      "index": 3,
-      "start_time": 20.26,
-      "end_time": 30.39,
-      "lyrics": "輕輕敲醒沉睡的心靈 慢慢張開你的眼睛",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-04": {
-      "id": "09d66a4f-04",
-      "song_id": "09d66a4f",
-      "index": 4,
-      "start_time": 30.39,
-      "end_time": 40.52,
-      "lyrics": "看看忙碌的世界 是否依然孤獨的轉個不停",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-05": {
-      "id": "09d66a4f-05",
-      "song_id": "09d66a4f",
-      "index": 5,
-      "start_time": 40.52,
-      "end_time": 50.65,
-      "lyrics": "春風不解風情 吹動少年的心\n讓昨日臉上的淚痕 隨記憶風乾了",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-06": {
-      "id": "09d66a4f-06",
-      "song_id": "09d66a4f",
-      "index": 6,
-      "start_time": 50.65,
-      "end_time": 60.78,
-      "lyrics": "抬頭尋找天空的翅膀 候鳥出現它的影跡",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-07": {
-      "id": "09d66a4f-07",
-      "song_id": "09d66a4f",
-      "index": 7,
-      "start_time": 60.78,
-      "end_time": 70.91,
-      "lyrics": "帶來遠處的飢荒 無情的戰火 依然存在的消息\n玉山白雪飄零 燃燒少年的心",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-08": {
-      "id": "09d66a4f-08",
-      "song_id": "09d66a4f",
-      "index": 8,
-      "start_time": 70.91,
-      "end_time": 81.04,
-      "lyrics": "使真情溶化成音符 傾訴遙遠的祝福",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-09": {
-      "id": "09d66a4f-09",
-      "song_id": "09d66a4f",
-      "index": 9,
-      "start_time": 81.04,
-      "end_time": 91.17,
-      "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-10": {
-      "id": "09d66a4f-10",
-      "song_id": "09d66a4f",
-      "index": 10,
-      "start_time": 91.17,
-      "end_time": 101.3,
-      "lyrics": "讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲",
+      "start_time": 223.6,
+      "end_time": 250.78,
+      "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲\n讓我們期待明天會更好",
       "difficulty": "hard",
       "is_chorus": true,
       "status": "unassigned",
@@ -1820,153 +337,13 @@
       "submit_count": 0,
       "claims": []
     },
-    "09d66a4f-11": {
-      "id": "09d66a4f-11",
-      "song_id": "09d66a4f",
-      "index": 11,
-      "start_time": 101.3,
-      "end_time": 111.43,
-      "lyrics": "為明天獻出虔誠的祈禱",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-12": {
-      "id": "09d66a4f-12",
-      "song_id": "09d66a4f",
-      "index": 12,
-      "start_time": 111.43,
-      "end_time": 121.56,
-      "lyrics": "誰能不顧自己的家園 拋開記憶中的童年\n誰能忍心看那昨日的憂愁帶走我們的笑容",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-13": {
-      "id": "09d66a4f-13",
-      "song_id": "09d66a4f",
-      "index": 13,
-      "start_time": 121.56,
-      "end_time": 131.69,
-      "lyrics": "青春不解紅塵 胭脂沾染了灰",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-14": {
-      "id": "09d66a4f-14",
-      "song_id": "09d66a4f",
-      "index": 14,
-      "start_time": 131.69,
-      "end_time": 141.82,
-      "lyrics": "讓久違不見的淚水 滋潤了你的面容\n唱出你的熱情 伸出你雙手",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-15": {
-      "id": "09d66a4f-15",
-      "song_id": "09d66a4f",
-      "index": 15,
-      "start_time": 141.82,
-      "end_time": 151.95,
-      "lyrics": "讓我擁抱著你的夢\n讓我擁有你真心的面孔",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-16": {
-      "id": "09d66a4f-16",
-      "song_id": "09d66a4f",
-      "index": 16,
-      "start_time": 151.95,
-      "end_time": 162.09,
-      "lyrics": "讓我們的笑容 充滿著青春的驕傲\n為明天獻出虔誠的祈禱",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-17": {
-      "id": "09d66a4f-17",
-      "song_id": "09d66a4f",
-      "index": 17,
-      "start_time": 162.09,
-      "end_time": 172.22,
-      "lyrics": "輕輕敲醒沉睡的心靈 慢慢張開你的眼睛",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-18": {
-      "id": "09d66a4f-18",
-      "song_id": "09d66a4f",
-      "index": 18,
-      "start_time": 172.22,
-      "end_time": 182.35,
-      "lyrics": "看那忙碌的世界 是否依然孤獨的轉個不停\n日出喚醒清晨 大地光彩重生",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-19": {
-      "id": "09d66a4f-19",
-      "song_id": "09d66a4f",
-      "index": 19,
-      "start_time": 182.35,
-      "end_time": 192.48,
-      "lyrics": "讓和風拂出的音響 譜成生命的樂章",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-20": {
-      "id": "09d66a4f-20",
-      "song_id": "09d66a4f",
-      "index": 20,
-      "start_time": 192.48,
-      "end_time": 202.61,
-      "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-21": {
-      "id": "09d66a4f-21",
-      "song_id": "09d66a4f",
-      "index": 21,
-      "start_time": 202.61,
-      "end_time": 212.74,
-      "lyrics": "讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲",
+    "320f9eae-19db9d": {
+      "id": "320f9eae-19db9d",
+      "song_id": "320f9eae",
+      "index": 9,
+      "start_time": 250.78,
+      "end_time": 277.46,
+      "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔\n讓我們的笑容 充滿著青春的驕傲\n讓我們期待明天會更好",
       "difficulty": "hard",
       "is_chorus": true,
       "status": "unassigned",
@@ -1974,423 +351,19 @@
       "submit_count": 0,
       "claims": []
     },
-    "09d66a4f-22": {
-      "id": "09d66a4f-22",
-      "song_id": "09d66a4f",
-      "index": 22,
-      "start_time": 212.74,
-      "end_time": 222.87,
-      "lyrics": "讓我們期待明天會更好",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-23": {
-      "id": "09d66a4f-23",
-      "song_id": "09d66a4f",
-      "index": 23,
-      "start_time": 222.87,
-      "end_time": 233.0,
-      "lyrics": "唱出你的熱情 伸出你雙手\n讓我擁抱著你的夢\n讓我擁有你真心的面孔",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-24": {
-      "id": "09d66a4f-24",
-      "song_id": "09d66a4f",
-      "index": 24,
-      "start_time": 233.0,
-      "end_time": 243.13,
-      "lyrics": "讓我們的笑容 充滿著青春的驕傲",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-25": {
-      "id": "09d66a4f-25",
-      "song_id": "09d66a4f",
-      "index": 25,
-      "start_time": 243.13,
-      "end_time": 253.26,
-      "lyrics": "讓我們期待明天會更好\n唱出你的熱情 伸出你雙手",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-26": {
-      "id": "09d66a4f-26",
-      "song_id": "09d66a4f",
-      "index": 26,
-      "start_time": 253.26,
-      "end_time": 263.39,
-      "lyrics": "讓我擁抱著你的夢\n讓我擁有你真心的面孔",
-      "difficulty": "normal",
-      "is_chorus": true,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-27": {
-      "id": "09d66a4f-27",
-      "song_id": "09d66a4f",
-      "index": 27,
-      "start_time": 263.39,
-      "end_time": 273.52,
-      "lyrics": "讓我們的笑容 充滿著青春的驕傲\n讓我們期待明天會更好",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-28": {
-      "id": "09d66a4f-28",
-      "song_id": "09d66a4f",
-      "index": 28,
-      "start_time": 273.52,
-      "end_time": 283.65,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-29": {
-      "id": "09d66a4f-29",
-      "song_id": "09d66a4f",
-      "index": 29,
-      "start_time": 283.65,
-      "end_time": 293.78,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-30": {
-      "id": "09d66a4f-30",
-      "song_id": "09d66a4f",
-      "index": 30,
-      "start_time": 293.78,
-      "end_time": 303.91,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-31": {
-      "id": "09d66a4f-31",
-      "song_id": "09d66a4f",
-      "index": 31,
-      "start_time": 303.91,
-      "end_time": 314.04,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "09d66a4f-32": {
-      "id": "09d66a4f-32",
-      "song_id": "09d66a4f",
-      "index": 32,
-      "start_time": 314.04,
-      "end_time": 324.17,
-      "lyrics": "",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "unassigned",
-      "claim_count": 0,
-      "submit_count": 0,
-      "claims": []
-    },
-    "7e9bf575-137208": {
-      "id": "7e9bf575-137208",
-      "song_id": "7e9bf575",
-      "index": 1,
-      "start_time": 25.5,
-      "end_time": 49.1,
-      "lyrics": "有人放烟花  有人追晚风\n借一缕时光  捧一片星空\n停一停 等一等 别匆匆",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 2,
-      "claims": [
-        {
-          "id": "8482722d",
-          "segment_id": "7e9bf575-137208",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
-    },
-    "7e9bf575-366b25": {
-      "id": "7e9bf575-366b25",
-      "song_id": "7e9bf575",
-      "index": 2,
-      "start_time": 49.1,
-      "end_time": 62,
-      "lyrics": "造梦者造了好梦 值得我称颂",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 1,
-      "claims": [
-        {
-          "id": "058433d0",
-          "segment_id": "7e9bf575-366b25",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
-    },
-    "7e9bf575-014b3b": {
-      "id": "7e9bf575-014b3b",
-      "song_id": "7e9bf575",
-      "index": 3,
-      "start_time": 62,
-      "end_time": 71.4,
-      "lyrics": "世界赠予我虫鸣 也赠予我雷霆",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 1,
-      "claims": [
-        {
-          "id": "e65b532f",
-          "segment_id": "7e9bf575-014b3b",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
-    },
-    "7e9bf575-90432d": {
-      "id": "7e9bf575-90432d",
-      "song_id": "7e9bf575",
-      "index": 4,
-      "start_time": 71.4,
-      "end_time": 79.6,
-      "lyrics": "赠我弯弯一枚月 也赠予我晚星",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 1,
-      "claims": [
-        {
-          "id": "4c43939b",
-          "segment_id": "7e9bf575-90432d",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
-    },
-    "7e9bf575-ea1e99": {
-      "id": "7e9bf575-ea1e99",
-      "song_id": "7e9bf575",
-      "index": 5,
-      "start_time": 79.6,
-      "end_time": 98.9,
-      "lyrics": "赠我一场病 又慢慢痊愈摇风铃\n赠我一场空 又渐渐填满真感情",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 1,
-      "claims": [
-        {
-          "id": "e9816465",
-          "segment_id": "7e9bf575-ea1e99",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
-    },
-    "7e9bf575-c217f8": {
-      "id": "7e9bf575-c217f8",
-      "song_id": "7e9bf575",
-      "index": 6,
-      "start_time": 114.3,
-      "end_time": 138.2,
-      "lyrics": "有人唱情歌 有人听晚钟\n借一丝懵懂 惊一片翻涌\n追一追 赶一赶 情正浓",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 1,
-      "claims": [
-        {
-          "id": "fdb38199",
-          "segment_id": "7e9bf575-c217f8",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
-    },
-    "7e9bf575-d4c29c": {
-      "id": "7e9bf575-d4c29c",
-      "song_id": "7e9bf575",
-      "index": 7,
-      "start_time": 138.2,
-      "end_time": 147.3,
-      "lyrics": "好故事眷顾好人 天赐的恩宠",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 1,
-      "claims": [
-        {
-          "id": "6391a480",
-          "segment_id": "7e9bf575-d4c29c",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
-    },
-    "7e9bf575-209057": {
-      "id": "7e9bf575-209057",
-      "song_id": "7e9bf575",
-      "index": 8,
-      "start_time": 147.3,
-      "end_time": 156.5,
-      "lyrics": "世界赠予我拥有 也赠予我回敬",
-      "difficulty": "easy",
-      "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 1,
-      "claims": [
-        {
-          "id": "5bfedc56",
-          "segment_id": "7e9bf575-209057",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
-    },
-    "7e9bf575-1a666f": {
-      "id": "7e9bf575-1a666f",
-      "song_id": "7e9bf575",
-      "index": 9,
-      "start_time": 156.5,
-      "end_time": 164.9,
-      "lyrics": "赠我小小一扇窗 也赠予我屋顶",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 1,
-      "claims": [
-        {
-          "id": "c60c9ee6",
-          "segment_id": "7e9bf575-1a666f",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
-    },
-    "7e9bf575-f5a9af": {
-      "id": "7e9bf575-f5a9af",
-      "song_id": "7e9bf575",
+    "320f9eae-de2537": {
+      "id": "320f9eae-de2537",
+      "song_id": "320f9eae",
       "index": 10,
-      "start_time": 164.9,
-      "end_time": 184.1,
-      "lyrics": "赠我一个名 又渐渐长大的年龄\n赠我一首诗 又悄悄读得很安静",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 1,
-      "claims": [
-        {
-          "id": "d7bdc8ee",
-          "segment_id": "7e9bf575-f5a9af",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
-    },
-    "7e9bf575-cb1935": {
-      "id": "7e9bf575-cb1935",
-      "song_id": "7e9bf575",
-      "index": 11,
-      "start_time": 184.1,
-      "end_time": 199.4,
-      "lyrics": "有人要回望 有人要憧憬 借一朵白云 拍一张合影",
+      "start_time": 277.46,
+      "end_time": 315.48,
+      "lyrics": "",
       "difficulty": "easy",
       "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 1,
-      "claims": [
-        {
-          "id": "01db19f2",
-          "segment_id": "7e9bf575-cb1935",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
-    },
-    "7e9bf575-a7da5d": {
-      "id": "7e9bf575-a7da5d",
-      "song_id": "7e9bf575",
-      "index": 12,
-      "start_time": 199.4,
-      "end_time": 221.1,
-      "lyrics": "想一想问自己莫打听 远去者去了远方 愿他都安心",
-      "difficulty": "normal",
-      "is_chorus": false,
-      "status": "completed",
-      "claim_count": 1,
-      "submit_count": 1,
-      "claims": [
-        {
-          "id": "35c59ed2",
-          "segment_id": "7e9bf575-a7da5d",
-          "user_id": "1dbb597c",
-          "user_name": "微信用户3773",
-          "status": "claimed"
-        }
-      ]
+      "status": "unassigned",
+      "claim_count": 0,
+      "submit_count": 0,
+      "claims": []
     }
   },
   "claims": {
@@ -2527,116 +500,98 @@
       "user_name": "微信用户2218",
       "status": "claimed"
     },
-    "cc491c89": {
-      "id": "cc491c89",
-      "segment_id": "5d436883-01",
-      "user_id": "75867038",
-      "user_name": "微信用户8398",
+    "41133057": {
+      "id": "41133057",
+      "segment_id": "320f9eae-a73ce8",
+      "user_id": "284bdc4b",
+      "user_name": "微信用户5807",
       "status": "claimed"
     },
-    "8482722d": {
-      "id": "8482722d",
-      "segment_id": "7e9bf575-137208",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
+    "56c144c8": {
+      "id": "56c144c8",
+      "segment_id": "320f9eae-d9b8af",
+      "user_id": "284bdc4b",
+      "user_name": "微信用户5807",
       "status": "claimed"
     },
-    "058433d0": {
-      "id": "058433d0",
-      "segment_id": "7e9bf575-366b25",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
+    "911d2cd3": {
+      "id": "911d2cd3",
+      "segment_id": "320f9eae-c729a4",
+      "user_id": "284bdc4b",
+      "user_name": "微信用户5807",
       "status": "claimed"
     },
-    "e65b532f": {
-      "id": "e65b532f",
-      "segment_id": "7e9bf575-014b3b",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "status": "claimed"
-    },
-    "4c43939b": {
-      "id": "4c43939b",
-      "segment_id": "7e9bf575-90432d",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "status": "claimed"
-    },
-    "e9816465": {
-      "id": "e9816465",
-      "segment_id": "7e9bf575-ea1e99",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "status": "claimed"
-    },
-    "fdb38199": {
-      "id": "fdb38199",
-      "segment_id": "7e9bf575-c217f8",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "status": "claimed"
-    },
-    "6391a480": {
-      "id": "6391a480",
-      "segment_id": "7e9bf575-d4c29c",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "status": "claimed"
-    },
-    "5bfedc56": {
-      "id": "5bfedc56",
-      "segment_id": "7e9bf575-209057",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "status": "claimed"
-    },
-    "c60c9ee6": {
-      "id": "c60c9ee6",
-      "segment_id": "7e9bf575-1a666f",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "status": "claimed"
-    },
-    "d7bdc8ee": {
-      "id": "d7bdc8ee",
-      "segment_id": "7e9bf575-f5a9af",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "status": "claimed"
-    },
-    "01db19f2": {
-      "id": "01db19f2",
-      "segment_id": "7e9bf575-cb1935",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "status": "claimed"
-    },
-    "35c59ed2": {
-      "id": "35c59ed2",
-      "segment_id": "7e9bf575-a7da5d",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
+    "7d33f3a5": {
+      "id": "7d33f3a5",
+      "segment_id": "320f9eae-4342eb",
+      "user_id": "284bdc4b",
+      "user_name": "微信用户5807",
       "status": "claimed"
     }
   },
   "recordings": {
-    "f4eab4cc": {
-      "id": "f4eab4cc",
-      "segment_id": "7e9bf575-137208",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/f4eab4cc.webm",
+    "145cb87c": {
+      "id": "145cb87c",
+      "segment_id": "320f9eae-a73ce8",
+      "song_id": "320f9eae",
+      "user_id": "284bdc4b",
+      "user_name": "微信用户5807",
+      "audio_url": "/api/uploads/145cb87c.webm",
       "score": 3.0,
       "score_detail": {
         "star": 3,
-        "composite": 54,
+        "composite": 67,
         "dimensions": {
           "volume": {
             "score": 86,
             "label": "音量",
             "icon": "🔊",
-            "detail": "音量起伏较大"
+            "detail": "音量控制良好"
+          },
+          "pitch": {
+            "score": 68,
+            "label": "音准",
+            "icon": "🎵",
+            "detail": "音准较好，偶有偏差"
+          },
+          "rhythm": {
+            "score": 40,
+            "label": "节奏",
+            "icon": "🥁",
+            "detail": "节奏需要加强"
+          },
+          "tone": {
+            "score": 78,
+            "label": "音色",
+            "icon": "🎶",
+            "detail": "音色较好"
+          }
+        },
+        "duration": 29
+      },
+      "likes": 0,
+      "submitted": true,
+      "selected": false,
+      "created_at": "2026-04-17 09:18:48"
+    },
+    "9005205c": {
+      "id": "9005205c",
+      "segment_id": "320f9eae-d9b8af",
+      "song_id": "320f9eae",
+      "user_id": "284bdc4b",
+      "user_name": "微信用户5807",
+      "user_avatar": "https://api.dicebear.com/7.x/fun-emoji/svg?seed=微信用户5807",
+      "audio_url": "/api/uploads/9005205c.webm",
+      "score": 3.0,
+      "score_detail": {
+        "star": 3,
+        "composite": 53,
+        "dimensions": {
+          "volume": {
+            "score": 86,
+            "label": "音量",
+            "icon": "🔊",
+            "detail": "音量控制良好"
           },
           "pitch": {
             "score": 30,
@@ -2645,7 +600,7 @@
             "detail": "音准需要加强练习"
           },
           "rhythm": {
-            "score": 40,
+            "score": 35,
             "label": "节奏",
             "icon": "🥁",
             "detail": "节奏需要加强"
@@ -2657,395 +612,28 @@
             "detail": "音色饱满清亮"
           }
         },
-        "duration": 23.9
+        "duration": 27.2
       },
       "likes": 0,
       "submitted": true,
       "selected": false,
-      "created_at": "2026-04-17 00:48:57"
+      "created_at": "2026-04-17 09:36:34"
     },
-    "90c60d3b": {
-      "id": "90c60d3b",
-      "segment_id": "7e9bf575-137208",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/90c60d3b.webm",
-      "score": 3.0,
-      "score_detail": {
-        "star": 3,
-        "composite": 65,
-        "dimensions": {
-          "volume": {
-            "score": 81,
-            "label": "音量",
-            "icon": "🔊",
-            "detail": "音量起伏较大"
-          },
-          "pitch": {
-            "score": 68,
-            "label": "音准",
-            "icon": "🎵",
-            "detail": "音准较好，偶有偏差"
-          },
-          "rhythm": {
-            "score": 35,
-            "label": "节奏",
-            "icon": "🥁",
-            "detail": "节奏需要加强"
-          },
-          "tone": {
-            "score": 83,
-            "label": "音色",
-            "icon": "🎶",
-            "detail": "音色饱满清亮"
-          }
-        },
-        "duration": 23.9
-      },
-      "likes": 0,
-      "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 01:04:41",
-      "_pitchShift": 0,
-      "_reverb": 0
-    },
-    "2ad567bd": {
-      "id": "2ad567bd",
-      "segment_id": "7e9bf575-366b25",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/2ad567bd.webm",
-      "score": 3.0,
-      "score_detail": {
-        "star": 3,
-        "composite": 63,
-        "dimensions": {
-          "volume": {
-            "score": 75,
-            "label": "音量",
-            "icon": "🔊",
-            "detail": "音量起伏较大"
-          },
-          "pitch": {
-            "score": 68,
-            "label": "音准",
-            "icon": "🎵",
-            "detail": "音准较好，偶有偏差"
-          },
-          "rhythm": {
-            "score": 35,
-            "label": "节奏",
-            "icon": "🥁",
-            "detail": "节奏需要加强"
-          },
-          "tone": {
-            "score": 78,
-            "label": "音色",
-            "icon": "🎶",
-            "detail": "音色较好"
-          }
-        },
-        "duration": 13.3
-      },
-      "likes": 0,
-      "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 01:05:49",
-      "_pitchShift": 0,
-      "_reverb": 0
-    },
-    "a7490f3b": {
-      "id": "a7490f3b",
-      "segment_id": "7e9bf575-014b3b",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/a7490f3b.webm",
-      "score": 3.0,
-      "score_detail": {
-        "star": 3,
-        "composite": 59,
-        "dimensions": {
-          "volume": {
-            "score": 89,
-            "label": "音量",
-            "icon": "🔊",
-            "detail": "音量控制良好"
-          },
-          "pitch": {
-            "score": 48,
-            "label": "音准",
-            "icon": "🎵",
-            "detail": "音准有波动，可多练习"
-          },
-          "rhythm": {
-            "score": 35,
-            "label": "节奏",
-            "icon": "🥁",
-            "detail": "节奏需要加强"
-          },
-          "tone": {
-            "score": 78,
-            "label": "音色",
-            "icon": "🎶",
-            "detail": "音色较好"
-          }
-        },
-        "duration": 9.8
-      },
-      "likes": 0,
-      "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 01:06:29",
-      "_pitchShift": 0,
-      "_reverb": 0
-    },
-    "a7f8caae": {
-      "id": "a7f8caae",
-      "segment_id": "7e9bf575-90432d",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/a7f8caae.webm",
+    "3748b04e": {
+      "id": "3748b04e",
+      "segment_id": "320f9eae-c729a4",
+      "song_id": "320f9eae",
+      "user_id": "284bdc4b",
+      "user_name": "微信用户5807",
+      "user_avatar": "https://api.dicebear.com/7.x/fun-emoji/svg?seed=微信用户5807",
+      "audio_url": "/api/uploads/3748b04e.webm",
       "score": 3.0,
       "score_detail": {
         "star": 3,
         "composite": 67,
         "dimensions": {
           "volume": {
-            "score": 83,
-            "label": "音量",
-            "icon": "🔊",
-            "detail": "音量控制良好"
-          },
-          "pitch": {
-            "score": 75,
-            "label": "音准",
-            "icon": "🎵",
-            "detail": "音准较好，偶有偏差"
-          },
-          "rhythm": {
-            "score": 35,
-            "label": "节奏",
-            "icon": "🥁",
-            "detail": "节奏需要加强"
-          },
-          "tone": {
-            "score": 78,
-            "label": "音色",
-            "icon": "🎶",
-            "detail": "音色较好"
-          }
-        },
-        "duration": 8.4
-      },
-      "likes": 0,
-      "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 01:49:50",
-      "_pitchShift": 0,
-      "_reverb": 0
-    },
-    "3619164d": {
-      "id": "3619164d",
-      "segment_id": "7e9bf575-ea1e99",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/3619164d.webm",
-      "score": 3.0,
-      "score_detail": {
-        "star": 3,
-        "composite": 65,
-        "dimensions": {
-          "volume": {
-            "score": 82,
-            "label": "音量",
-            "icon": "🔊",
-            "detail": "音量起伏较大"
-          },
-          "pitch": {
-            "score": 75,
-            "label": "音准",
-            "icon": "🎵",
-            "detail": "音准较好，偶有偏差"
-          },
-          "rhythm": {
-            "score": 35,
-            "label": "节奏",
-            "icon": "🥁",
-            "detail": "节奏需要加强"
-          },
-          "tone": {
-            "score": 70,
-            "label": "音色",
-            "icon": "🎶",
-            "detail": "音色较好"
-          }
-        },
-        "duration": 19.6
-      },
-      "likes": 0,
-      "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 01:54:58",
-      "_pitchShift": 0,
-      "_reverb": 0
-    },
-    "51812e07": {
-      "id": "51812e07",
-      "segment_id": "7e9bf575-c217f8",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/51812e07.webm",
-      "score": 3.0,
-      "score_detail": {
-        "star": 3,
-        "composite": 61,
-        "dimensions": {
-          "volume": {
-            "score": 80,
-            "label": "音量",
-            "icon": "🔊",
-            "detail": "音量起伏较大"
-          },
-          "pitch": {
-            "score": 58,
-            "label": "音准",
-            "icon": "🎵",
-            "detail": "音准有波动，可多练习"
-          },
-          "rhythm": {
-            "score": 35,
-            "label": "节奏",
-            "icon": "🥁",
-            "detail": "节奏需要加强"
-          },
-          "tone": {
-            "score": 78,
-            "label": "音色",
-            "icon": "🎶",
-            "detail": "音色较好"
-          }
-        },
-        "duration": 24.1
-      },
-      "likes": 0,
-      "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 01:55:38",
-      "_pitchShift": 0,
-      "_reverb": 0
-    },
-    "fc2aef82": {
-      "id": "fc2aef82",
-      "segment_id": "7e9bf575-d4c29c",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/fc2aef82.webm",
-      "score": 3.0,
-      "score_detail": {
-        "star": 3,
-        "composite": 56,
-        "dimensions": {
-          "volume": {
-            "score": 81,
-            "label": "音量",
-            "icon": "🔊",
-            "detail": "音量起伏较大"
-          },
-          "pitch": {
-            "score": 40,
-            "label": "音准",
-            "icon": "🎵",
-            "detail": "音准有波动，可多练习"
-          },
-          "rhythm": {
-            "score": 35,
-            "label": "节奏",
-            "icon": "🥁",
-            "detail": "节奏需要加强"
-          },
-          "tone": {
-            "score": 83,
-            "label": "音色",
-            "icon": "🎶",
-            "detail": "音色饱满清亮"
-          }
-        },
-        "duration": 9.3
-      },
-      "likes": 0,
-      "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 01:56:31",
-      "_pitchShift": 0,
-      "_reverb": 0
-    },
-    "753929fb": {
-      "id": "753929fb",
-      "segment_id": "7e9bf575-209057",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/753929fb.webm",
-      "score": 3.0,
-      "score_detail": {
-        "star": 3,
-        "composite": 66,
-        "dimensions": {
-          "volume": {
-            "score": 85,
-            "label": "音量",
-            "icon": "🔊",
-            "detail": "音量控制良好"
-          },
-          "pitch": {
-            "score": 68,
-            "label": "音准",
-            "icon": "🎵",
-            "detail": "音准较好，偶有偏差"
-          },
-          "rhythm": {
-            "score": 35,
-            "label": "节奏",
-            "icon": "🥁",
-            "detail": "节奏需要加强"
-          },
-          "tone": {
-            "score": 83,
-            "label": "音色",
-            "icon": "🎶",
-            "detail": "音色饱满清亮"
-          }
-        },
-        "duration": 9.4
-      },
-      "likes": 0,
-      "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 01:56:56",
-      "_pitchShift": 0,
-      "_reverb": 0
-    },
-    "e5e58439": {
-      "id": "e5e58439",
-      "segment_id": "7e9bf575-1a666f",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/e5e58439.webm",
-      "score": 3.0,
-      "score_detail": {
-        "star": 3,
-        "composite": 65,
-        "dimensions": {
-          "volume": {
-            "score": 84,
+            "score": 93,
             "label": "音量",
             "icon": "🔊",
             "detail": "音量控制良好"
@@ -3069,152 +657,12 @@
             "detail": "音色较好"
           }
         },
-        "duration": 8.6
+        "duration": 29.3
       },
       "likes": 0,
       "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 01:57:18",
-      "_pitchShift": 0,
-      "_reverb": 0
-    },
-    "01ffa39a": {
-      "id": "01ffa39a",
-      "segment_id": "7e9bf575-f5a9af",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/01ffa39a.webm",
-      "score": 3.0,
-      "score_detail": {
-        "star": 3,
-        "composite": 66,
-        "dimensions": {
-          "volume": {
-            "score": 84,
-            "label": "音量",
-            "icon": "🔊",
-            "detail": "音量控制良好"
-          },
-          "pitch": {
-            "score": 75,
-            "label": "音准",
-            "icon": "🎵",
-            "detail": "音准较好，偶有偏差"
-          },
-          "rhythm": {
-            "score": 35,
-            "label": "节奏",
-            "icon": "🥁",
-            "detail": "节奏需要加强"
-          },
-          "tone": {
-            "score": 70,
-            "label": "音色",
-            "icon": "🎶",
-            "detail": "音色较好"
-          }
-        },
-        "duration": 19.4
-      },
-      "likes": 0,
-      "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 01:57:53",
-      "_pitchShift": 0,
-      "_reverb": 0
-    },
-    "64f9886b": {
-      "id": "64f9886b",
-      "segment_id": "7e9bf575-cb1935",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/64f9886b.webm",
-      "score": 3.0,
-      "score_detail": {
-        "star": 3,
-        "composite": 68,
-        "dimensions": {
-          "volume": {
-            "score": 80,
-            "label": "音量",
-            "icon": "🔊",
-            "detail": "音量起伏较大"
-          },
-          "pitch": {
-            "score": 83,
-            "label": "音准",
-            "icon": "🎵",
-            "detail": "音准稳定，表现出色"
-          },
-          "rhythm": {
-            "score": 35,
-            "label": "节奏",
-            "icon": "🥁",
-            "detail": "节奏需要加强"
-          },
-          "tone": {
-            "score": 70,
-            "label": "音色",
-            "icon": "🎶",
-            "detail": "音色较好"
-          }
-        },
-        "duration": 15.5
-      },
-      "likes": 0,
-      "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 01:58:27",
-      "_pitchShift": 0,
-      "_reverb": 0
-    },
-    "06748944": {
-      "id": "06748944",
-      "segment_id": "7e9bf575-a7da5d",
-      "song_id": "7e9bf575",
-      "user_id": "1dbb597c",
-      "user_name": "微信用户3773",
-      "audio_url": "/api/uploads/06748944.webm",
-      "score": 3.0,
-      "score_detail": {
-        "star": 3,
-        "composite": 64,
-        "dimensions": {
-          "volume": {
-            "score": 80,
-            "label": "音量",
-            "icon": "🔊",
-            "detail": "音量起伏较大"
-          },
-          "pitch": {
-            "score": 68,
-            "label": "音准",
-            "icon": "🎵",
-            "detail": "音准较好，偶有偏差"
-          },
-          "rhythm": {
-            "score": 35,
-            "label": "节奏",
-            "icon": "🥁",
-            "detail": "节奏需要加强"
-          },
-          "tone": {
-            "score": 78,
-            "label": "音色",
-            "icon": "🎶",
-            "detail": "音色较好"
-          }
-        },
-        "duration": 22
-      },
-      "likes": 0,
-      "submitted": true,
-      "selected": true,
-      "created_at": "2026-04-17 02:00:15",
-      "_pitchShift": 0,
-      "_reverb": 0
+      "selected": false,
+      "created_at": "2026-04-17 09:37:35"
     }
   },
   "users": {
@@ -3247,24 +695,12 @@
       "id": "1dbb597c",
       "nickname": "微信用户3773",
       "avatar": "https://api.dicebear.com/7.x/fun-emoji/svg?seed=微信用户3773"
+    },
+    "284bdc4b": {
+      "id": "284bdc4b",
+      "nickname": "微信用户5807",
+      "avatar": "https://api.dicebear.com/7.x/fun-emoji/svg?seed=微信用户5807"
     }
   },
-  "finals": {
-    "c01dcfd9": {
-      "id": "c01dcfd9",
-      "song_id": "7e9bf575",
-      "song_title": "世界赠予我的",
-      "song_artist": "王菲",
-      "duration": 244.28,
-      "audio_file": "final_7e9bf575_c01dcfd9.mp3",
-      "audio_url": "/api/finals/final_7e9bf575_c01dcfd9.mp3",
-      "metadata_file": "meta_7e9bf575_c01dcfd9.json",
-      "recordings_dir": "recs_7e9bf575_c01dcfd9",
-      "track_count": 12,
-      "segment_count": 12,
-      "published": true,
-      "created_at": "2026-04-17 02:17:51",
-      "published_at": "2026-04-17 02:48:04"
-    }
-  }
+  "finals": {}
 }

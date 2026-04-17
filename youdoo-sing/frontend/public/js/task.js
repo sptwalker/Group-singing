@@ -701,20 +701,29 @@
                 html += `<div class="rec-seg-separator" data-sep-seg-id="${rec.segment_id}"><span class="sep-lyrics">${seg ? '#' + seg.index + ' ' + seg.lyrics : ''}</span></div>`;
             }
             lastSegId = rec.segment_id;
-            const timeStr = rec.created_at ? `<span class="rec-time">${rec.created_at}</span>` : '';
+            const timeStr = rec.created_at ? rec.created_at : '';
+            const avatarUrl = rec.user_avatar || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${encodeURIComponent(rec.user_name)}`;
+            const datePart = timeStr ? timeStr.split(' ')[0] : '';
+            const timePart = timeStr ? timeStr.split(' ')[1] || '' : '';
             html += `
                 <div class="rec-card ${(focusSegId && rec.segment_id === focusSegId) ? 'rec-card-focus' : ''}" data-id="${rec.id}" data-seg-id="${rec.segment_id}" data-rec-idx="${i}">
                     <div class="rec-card-top">
-                        <button class="btn-play-mini" data-rec-idx="${i}">▶</button>
-                        <div style="flex:1;min-width:0;">
-                            <div class="rec-user">${rec.user_name} ${timeStr}</div>
+                        <img class="rec-avatar" src="${avatarUrl}" alt="" onerror="this.src='https://api.dicebear.com/7.x/fun-emoji/svg?seed=default'">
+                        <div class="rec-info">
+                            <div class="rec-info-header">
+                                <span class="rec-user">${rec.user_name}</span>
+                                <span class="rec-date">${datePart} ${timePart}</span>
+                            </div>
                             <div class="rec-seg-num">#${seg ? seg.index : '?'} ${seg ? seg.lyrics : ''}</div>
                         </div>
                         <div class="rec-like" data-id="${rec.id}">
                             ❤ <span>${rec.likes}</span>
                         </div>
                     </div>
-                    <div class="rec-wave-container" id="taskRecW${i}"></div>
+                    <div class="rec-card-bottom">
+                        <button class="btn-play-mini" data-rec-idx="${i}">▶</button>
+                        <div class="rec-wave-container" id="taskRecW${i}"></div>
+                    </div>
                 </div>
             `;
         });

@@ -1423,6 +1423,7 @@
             fd.append('song_id', song.id);
             fd.append('user_id', user.id);
             fd.append('user_name', user.nickname);
+            fd.append('user_avatar', user.avatar || '');
             fd.append('score', rec.score);
             // 传递多维度评分详情
             if (rec.scoreResult) {

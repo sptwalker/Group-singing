@@ -1092,6 +1092,28 @@ async def user_login(nickname: str = Form(...)):
 
 # ============ 歌曲接口 ============
 
+def _calc_completion(song):
+    """动态计算完成度：有已提交录音的唱段 / 总唱段数"""
+    segs = song.get("segments", [])
+    if not segs:
+        return 0.0
+    # 收集所有已提交录音的 segment_id
+    submitted_seg_ids = set()
+    for r in RECORDINGS_DB.values():
+        if r.get("song_id") == song["id"] and r.get("submitted"):
+            submitted_seg_ids.add(r["segment_id"])
+    # 已完成（管理员标记）或有已提交录音的段都算
+    done = sum(1 for s in segs if s["status"] == "completed" or s["id"] in submitted_seg_ids)
+    return round(done / len(segs) * 100, 1)
+
+def _calc_participant_count(song):
+    """动态计算参与人数"""
+    user_ids = set()
+    for r in RECORDINGS_DB.values():
+        if r.get("song_id") == song["id"] and r.get("submitted"):
+            user_ids.add(r["user_id"])
+    return len(user_ids)
+
 @router.get("/songs")
 async def get_songs():
     """获取所有歌曲列表"""
@@ -1114,8 +1136,8 @@ async def get_songs():
             "duration": s["duration"],
             "audio_url": s["audio_url"],
             "segment_count": s["segment_count"],
-            "participant_count": s["participant_count"],
-            "completion": s["completion"],
+            "participant_count": _calc_participant_count(s),
+            "completion": _calc_completion(s),
             "published_final": published_final,
         })
     return {"success": True, "data": songs}
@@ -1144,6 +1166,8 @@ async def get_song(song_id: str):
             break
     data = dict(song)
     data["published_final"] = published_final
+    data["completion"] = _calc_completion(song)
+    data["participant_count"] = _calc_participant_count(song)
     return {"success": True, "data": data}
 
 
@@ -1249,6 +1273,7 @@ async def upload_recording(
     user_name: str = Form(...),
     score: float = Form(0.0),
     score_detail: str = Form(""),
+    user_avatar: str = Form(""),
     audio: UploadFile = File(...),
 ):
     """上传录音"""
@@ -1268,12 +1293,22 @@ async def upload_recording(
         except Exception:
             pass
 
+    # 头像：优先用传入的，否则用用户库中的，最后用 DiceBear 生成
+    avatar = user_avatar or ""
+    if not avatar:
+        u = USERS_DB.get(user_id)
+        if u:
+            avatar = u.get("avatar", "")
+    if not avatar:
+        avatar = f"https://api.dicebear.com/7.x/fun-emoji/svg?seed={user_name}"
+
     recording = {
         "id": rec_id,
         "segment_id": segment_id,
         "song_id": song_id,
         "user_id": user_id,
         "user_name": user_name,
+        "user_avatar": avatar,
         "audio_url": f"/api/uploads/{filename}",
         "score": score,
         "score_detail": parsed_detail,
