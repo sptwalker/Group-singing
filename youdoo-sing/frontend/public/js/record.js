@@ -211,7 +211,7 @@
             AudioManager.stop();
             _stopSyncLoop();
             btnAudition.className = 'btn-record-ctrl btn-audition';
-            btnAudition.textContent = '�?播放试唱';
+            btnAudition.textContent = '\u25b6 播放试唱';
             isAuditioning = false;
             clearLyricsHighlight();
             return;
@@ -225,14 +225,14 @@
         AudioManager.playRange(audioUrl, startTime, endTime, () => {
             _stopSyncLoop();
             btnAudition.className = 'btn-record-ctrl btn-audition';
-            btnAudition.textContent = '�?播放试唱';
+            btnAudition.textContent = '\u25b6 播放试唱';
             isAuditioning = false;
             clearLyricsHighlight();
         });
 
         _startSyncLoop(curTime => highlightLyrics(curTime));
         btnAudition.className = 'btn-record-ctrl btn-audition playing';
-        btnAudition.textContent = '�?停止试听';
+        btnAudition.textContent = '\u25a0 停止试听';
         isAuditioning = true;
     });
 
@@ -336,7 +336,7 @@
             AudioManager.stop();
             isAuditioning = false;
             btnAudition.className = 'btn-record-ctrl btn-audition';
-            btnAudition.textContent = '�?播放试唱';
+            btnAudition.textContent = '\u25b6 播放试唱';
         }
 
         // 正在停止流程中，忽略点击
@@ -378,7 +378,7 @@
             });
         } catch (e) {
             showToast('无法访问麦克风，请授权后重试');
-            console.error('[录音] 麦克风获取失�?', e);
+            console.error('[录音] 麦克风获取失败', e);
             return;
         }
 
@@ -458,7 +458,7 @@
         if (_autoStopTimer) clearTimeout(_autoStopTimer);
         const maxDuration = (segment.end_time - playStart + 2) * 1000;  // 额外2秒容�?
         _autoStopTimer = setTimeout(() => {
-            console.log('[录音] 安全兜底定时器触�? isRecording=', isRecording, '_recPreparing=', _recPreparing);
+            console.log('[录音] 安全兜底定时器触发 isRecording=', isRecording, '_recPreparing=', _recPreparing);
             if (isRecording || _recPreparing) {
                 stopRecording(false);
             }
@@ -579,7 +579,7 @@
         // 检�?track 是否还活着
         const tracks = recStream.getAudioTracks();
         if (tracks.length === 0 || tracks[0].readyState !== 'live') {
-            console.error('[录音] 音频 track 已失�?', tracks.length > 0 ? tracks[0].readyState : 'no tracks');
+            console.error('[录音] 音频 track 已失效', tracks.length > 0 ? tracks[0].readyState : 'no tracks');
             showToast('\u9ea6\u514b\u98ce\u8fde\u63a5\u4e22\u5931\uff0c\u8bf7\u91cd\u8bd5');
             return;
         }
@@ -799,7 +799,7 @@
             // 构建完整音频处理链（降噪+美化+波形分析�?
             buildAudioProcessingChain(stream);
         } catch(e) {
-            console.warn('[波形] 初始化失�?', e);
+            console.warn('[波形] 初始化失败', e);
             return;
         }
 
@@ -1200,7 +1200,7 @@
 
         let starsHtml = '';
         for (let i = 1; i <= 5; i++) {
-            starsHtml += `<span class="score-star ${i <= scoreResult.star ? 'filled' : ''}" style="animation-delay:${i * 0.12}s">�?/span>`;
+            starsHtml += `<span class="score-star ${i <= scoreResult.star ? 'filled' : ''}" style="animation-delay:${i * 0.12}s">&#9733;</span>`;
         }
 
         let dimsHtml = dimKeys.map(key => {
@@ -1232,7 +1232,7 @@
         `;
         document.body.appendChild(overlay);
 
-        // 动画：渐�?+ 条形图动�?
+        // 动画：渐显 + 条形图展开
         requestAnimationFrame(() => {
             overlay.classList.add('show');
             setTimeout(() => {
@@ -1272,7 +1272,7 @@
         const recIdx = myRecordings.length;
         myRecordings.push(rec);
         renderMyRecordings();
-        showToast('录音完成，正在分�?..');
+        showToast('录音完成，正在评分...');
 
         // 异步分析评分
         analyzeRecording(blob).then(result => {
@@ -1282,7 +1282,7 @@
                 renderMyRecordings();
                 showScorePanel(result);
             } else {
-                // 分析失败，给默认�?
+                // 分析失败，给默认评分
                 rec.score = 3;
                 rec.scoreResult = null;
                 renderMyRecordings();
@@ -1301,7 +1301,7 @@
         }
 
         if (myRecordings.length === 0) {
-            myRecList.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.3);padding:20px;font-size:13px;">录音后将在这里显�?/div>';
+            myRecList.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.3);padding:20px;font-size:13px;">录音后将在这里显示</div>';
             recActions.style.display = 'none';
             return;
         }
@@ -1309,10 +1309,10 @@
         myRecList.innerHTML = myRecordings.map((rec, i) => {
             let stars = '';
             if (rec.score === 0 && !rec.scoreResult) {
-                stars = '<span class="score-analyzing">分析�?..</span>';
+                stars = '<span class="score-analyzing">分析中...</span>';
             } else {
                 for (let s = 1; s <= 5; s++) {
-                    stars += `<span class="star ${s <= rec.score ? 'filled' : ''}">�?/span>`;
+                    stars += `<span class="star ${s <= rec.score ? 'filled' : ''}">&#9733;</span>`;
                 }
             }
             const detailBtn = rec.scoreResult ? `<button class="btn-score-detail" data-rec-idx="${i}" title="查看详细评分">📊</button>` : '';
@@ -1382,7 +1382,7 @@
             rec._ws.stop();
         }
         _recPlaying = false;
-        btnRecPlay.textContent = '�?播放';
+        btnRecPlay.textContent = '\u25b6 播放';
     }
 
     btnRecPlay.addEventListener('click', () => {
