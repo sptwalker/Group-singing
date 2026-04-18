@@ -1,5 +1,5 @@
 // ===== 管理后台核心框架 =====
-const API = 'http://127.0.0.1:8000/api';
+const API = 'http://sing.youdoogo.com:8000/api';
 let adminToken = localStorage.getItem('admin_token') || '';
 
 // ===== API 工具 =====

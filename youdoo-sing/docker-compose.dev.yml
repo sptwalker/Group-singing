@@ -1,5 +1,4 @@
 # 轻量开发模式：仅应用容器，使用本地 JSON 文件存储（无需 PostgreSQL/Redis）
-version: '3.8'
 
 services:
   app:

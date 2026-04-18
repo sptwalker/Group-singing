@@ -1,5 +1,5 @@
 // ===== 全局配置 =====
-const API_BASE = 'http://127.0.0.1:8000/api';
+const API_BASE = 'http://sing.youdoogo.com:8000/api';
 
 // ===== 全局音频管理器（强制互斥） =====
 const AudioManager = {
