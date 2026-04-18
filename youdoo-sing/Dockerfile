@@ -12,7 +12,8 @@ WORKDIR /app
 
 COPY backend/requirements.txt /app/backend/requirements.txt
 
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt 2>/dev/null || \
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r /app/backend/requirements.txt 2>/dev/null || \
     pip install --no-cache-dir \
     fastapi uvicorn python-multipart \
     sqlalchemy alembic psycopg2-binary \
