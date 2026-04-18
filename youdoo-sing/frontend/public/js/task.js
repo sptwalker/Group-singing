@@ -1,7 +1,12 @@
 // ===== 任务页逻辑 =====
 (function () {
     const user = getUser();
-    const isGuest = !user;
+    if (!user) {
+        setPendingLoginTarget(getCurrentPageTarget('task.html'));
+        window.location.replace('index.html');
+        return;
+    }
+
     let songs = [];
     let currentSongIndex = 0;
     let currentSong = null;
@@ -41,17 +46,9 @@
     function requireUser(message) {
         if (user) return user;
         showToast(message || 'Please sign in first');
+        setPendingLoginTarget(getCurrentPageTarget('task.html'));
+        window.location.replace('index.html');
         return null;
-    }
-
-    if (isGuest) {
-        btnLogout.textContent = 'Login';
-        btnLogout.title = 'Login';
-        btnLogout.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            window.location.href = 'index.html';
-        }, true);
     }
 
     init();
