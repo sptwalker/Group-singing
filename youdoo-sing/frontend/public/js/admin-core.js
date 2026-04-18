@@ -1,5 +1,9 @@
 // ===== 管理后台核心框架 =====
+<<<<<<< HEAD
 const API = (window.YOUDOO_API_BASE || '/api').replace(/\/$/, '');
+=======
+const API = 'http://sing.youdoogo.com:8000/api';
+>>>>>>> 107b13014f86ae4e2e0abc7e2581d8b42efd756d
 let adminToken = localStorage.getItem('admin_token') || '';
 
 // ===== API 工具 =====

@@ -1,6 +1,10 @@
 // ===== 全局配置 =====
+<<<<<<< HEAD
 const API_BASE = (window.YOUDOO_API_BASE || '/api').replace(/\/$/, '');
 let _loginRedirectTimer = 0;
+=======
+const API_BASE = 'http://sing.youdoogo.com:8000/api';
+>>>>>>> 107b13014f86ae4e2e0abc7e2581d8b42efd756d
 
 // ===== 全局音频管理器（强制互斥） =====
 const AudioManager = {

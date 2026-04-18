@@ -1,7 +1,11 @@
 import axios from 'axios'
 
 const api = axios.create({
+<<<<<<< HEAD
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+=======
+  baseURL: 'http://sing.youdoogo.com:8000',
+>>>>>>> 107b13014f86ae4e2e0abc7e2581d8b42efd756d
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',

@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 
+<<<<<<< HEAD
+=======
+const API_BASE_URL = 'http://sing.youdoogo.com:8000'
+
+>>>>>>> 107b13014f86ae4e2e0abc7e2581d8b42efd756d
 function Home() {
   const [health, setHealth] = useState<string>('checking...')
 
