@@ -1420,9 +1420,12 @@ def _calc_participant_count(song):
 
 @router.get("/songs")
 async def get_songs():
-    """获取所有歌曲列表"""
+    """获取所有歌曲列表（仅返回已发布任务的歌曲）"""
     songs = []
     for s in SONGS_DB.values():
+        # 只返回已发布任务的歌曲
+        if not s.get("task_published"):
+            continue
         # 检查是否有已发布的成曲
         published_final = None
         for f in FINALS_DB.values():
@@ -1912,7 +1915,18 @@ async def admin_get_song(song_id: str, request: Request):
     for seg in song["segments"]:
         recs = [r for r in RECORDINGS_DB.values() if r["segment_id"] == seg["id"]]
         enriched_segments.append({**seg, "recordings": recs})
-    return {"success": True, "data": {**song, "segments": enriched_segments}}
+    # 动态计算 has_accompaniment / has_lyrics（与列表接口一致）
+    acc_file = song.get("accompaniment_file", "")
+    has_acc = bool(acc_file) and os.path.exists(os.path.join(UPLOAD_DIR, acc_file))
+    has_lyrics = song.get("has_lyrics", False) or any(
+        seg.get("lyrics", "").strip() for seg in song.get("segments", [])
+    )
+    return {"success": True, "data": {
+        **song,
+        "segments": enriched_segments,
+        "has_accompaniment": has_acc,
+        "has_lyrics": has_lyrics,
+    }}
 
 
 @router.put("/admin/songs/{song_id}")
@@ -2243,6 +2257,8 @@ async def admin_batch_update_segments(song_id: str, request: Request):
     song = SONGS_DB.get(song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
+    if song.get("task_published"):
+        raise HTTPException(status_code=400, detail="任务已发布，无法修改分段。请先取消任务。")
     body = await request.json()
     segments_data = body.get("segments", [])
     confirm_delete = body.get("confirm_delete", False)
@@ -2343,6 +2359,167 @@ async def admin_batch_update_segments(song_id: str, request: Request):
     return {"success": True, "data": new_segments, "deleted_recordings": len(orphan_recs)}
 
 
+@router.post("/admin/songs/{song_id}/publish-task")
+async def admin_publish_task(song_id: str, request: Request):
+    """发布歌曲任务，前端任务页才会显示该歌曲"""
+    verify_admin(request)
+    song = SONGS_DB.get(song_id)
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲不存在")
+    if not song.get("segments"):
+        raise HTTPException(status_code=400, detail="歌曲没有唱段数据，请先完成分段编辑")
+    song["task_published"] = True
+    song["task_published_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _save_db()
+    return {"success": True, "data": song}
+
+
+@router.post("/admin/songs/{song_id}/unpublish-task")
+async def admin_unpublish_task(song_id: str, request: Request):
+    """取消歌曲任务，删除该歌曲所有用户录音并恢复可编辑状态"""
+    verify_admin(request)
+    song = SONGS_DB.get(song_id)
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲不存在")
+
+    # 删除该歌曲所有录音及音频文件
+    recs_to_delete = [
+        rid for rid, r in RECORDINGS_DB.items()
+        if r.get("song_id") == song_id
+    ]
+    deleted_count = 0
+    for rid in recs_to_delete:
+        r = RECORDINGS_DB.pop(rid, None)
+        if r:
+            audio_url = r.get("audio_url", "")
+            filename = audio_url.split("/")[-1] if "/" in audio_url else audio_url
+            if filename:
+                filepath = os.path.join(UPLOAD_DIR, filename)
+                if os.path.exists(filepath):
+                    try:
+                        os.remove(filepath)
+                    except Exception:
+                        pass
+            deleted_count += 1
+
+    # 重置所有唱段状态
+    for seg in song.get("segments", []):
+        seg["status"] = "unassigned"
+        seg["claim_count"] = 0
+        seg["submit_count"] = 0
+        seg["claims"] = []
+        # 清理 SEGMENTS_DB 中对应的记录
+        if seg["id"] in SEGMENTS_DB:
+            SEGMENTS_DB[seg["id"]]["status"] = "unassigned"
+            SEGMENTS_DB[seg["id"]]["claim_count"] = 0
+            SEGMENTS_DB[seg["id"]]["submit_count"] = 0
+            SEGMENTS_DB[seg["id"]]["claims"] = []
+
+    # 清理该歌曲的 claims
+    claims_to_delete = [
+        cid for cid, c in CLAIMS_DB.items()
+        if c.get("song_id") == song_id
+    ]
+    for cid in claims_to_delete:
+        CLAIMS_DB.pop(cid, None)
+
+    song["task_published"] = False
+    song.pop("task_published_at", None)
+    _save_db()
+    return {"success": True, "deleted_recordings": deleted_count}
+
+
+# ============ 管理员 - 自由任务管理 ============
+
+@router.get("/admin/songs/{song_id}/free-tasks")
+async def admin_get_free_tasks(song_id: str, request: Request):
+    """获取歌曲的自由任务列表"""
+    verify_admin(request)
+    song = SONGS_DB.get(song_id)
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲不存在")
+    # 附加每个自由任务的录音
+    free_tasks = []
+    for ft in song.get("free_tasks", []):
+        ft_data = dict(ft)
+        ft_data["recordings"] = [r for r in RECORDINGS_DB.values()
+                                  if r.get("song_id") == song_id and r.get("segment_id") == ft["id"]]
+        free_tasks.append(ft_data)
+    return {"success": True, "data": free_tasks}
+
+
+@router.post("/admin/songs/{song_id}/free-tasks")
+async def admin_create_free_task(song_id: str, request: Request):
+    """创建新的自由任务（最多5个）"""
+    verify_admin(request)
+    song = SONGS_DB.get(song_id)
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲不存在")
+
+    body = await request.json()
+    description = (body.get("description") or "").strip()
+    start_time = float(body.get("start_time", 0))
+    end_time = float(body.get("end_time", 0))
+    difficulty = body.get("difficulty", "normal")
+    task_type = body.get("type", "solo")
+
+    if not description:
+        raise HTTPException(status_code=400, detail="描述文字不能为空")
+    if end_time - start_time < 5:
+        raise HTTPException(status_code=400, detail="时间间隔至少需要5秒")
+
+    existing = song.get("free_tasks", [])
+    if len(existing) >= 5:
+        raise HTTPException(status_code=400, detail="每首歌曲最多5个自由任务")
+
+    new_ft = {
+        "id": f"ft_{uuid.uuid4().hex[:8]}",
+        "description": description,
+        "start_time": start_time,
+        "end_time": end_time,
+        "difficulty": difficulty,
+        "type": task_type,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    existing.append(new_ft)
+    song["free_tasks"] = existing
+    _save_db()
+    new_ft["recordings"] = []
+    return {"success": True, "data": new_ft}
+
+
+@router.delete("/admin/songs/{song_id}/free-tasks/{free_task_id}")
+async def admin_delete_free_task(song_id: str, free_task_id: str, request: Request):
+    """删除自由任务（同时删除其录音）"""
+    verify_admin(request)
+    song = SONGS_DB.get(song_id)
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲不存在")
+
+    free_tasks = song.get("free_tasks", [])
+    matched = [ft for ft in free_tasks if ft["id"] == free_task_id]
+    if not matched:
+        raise HTTPException(status_code=404, detail="自由任务不存在")
+
+    # 删除该自由任务的所有录音及文件
+    recs_to_del = [r for r in RECORDINGS_DB.values()
+                   if r.get("segment_id") == free_task_id]
+    for rec in recs_to_del:
+        audio_url = rec.get("audio_url", "")
+        filename = audio_url.split("/")[-1] if "/" in audio_url else audio_url
+        if filename:
+            filepath = os.path.join(UPLOAD_DIR, filename)
+            if os.path.exists(filepath):
+                try: os.remove(filepath)
+                except Exception: pass
+        RECORDINGS_DB.pop(rec.get("id"), None)
+
+    # 从列表移除
+    song["free_tasks"] = [ft for ft in free_tasks if ft["id"] != free_task_id]
+    _save_db()
+    return {"success": True, "deleted_recordings": len(recs_to_del)}
+
+
 # ============ 管理员 - 录音管理 ============
 
 @router.get("/admin/recordings")
@@ -2393,6 +2570,80 @@ async def admin_unselect_recording(recording_id: str, request: Request):
     rec["selected"] = False
     _save_db()
     return {"success": True, "data": rec}
+
+
+@router.post("/admin/recordings/{recording_id}/trim")
+async def admin_trim_recording(recording_id: str, request: Request):
+    """裁剪录音：去掉开头和结尾指定秒数的音频"""
+    verify_admin(request)
+    body = await request.json()
+    trim_start = float(body.get("trim_start", 0))
+    trim_end = float(body.get("trim_end", 0))
+
+    if trim_start <= 0 and trim_end <= 0:
+        return {"success": True, "message": "无需裁剪"}
+
+    rec = RECORDINGS_DB.get(recording_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="录音不存在")
+
+    audio_url = rec.get("audio_url", "")
+    # audio_url 格式: /api/uploads/xxx.webm
+    filename = audio_url.split("/")[-1] if "/" in audio_url else audio_url
+    src_path = os.path.join(UPLOAD_DIR, filename)
+
+    if not os.path.exists(src_path):
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+
+    # 使用 ffmpeg 获取音频时长
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", src_path],
+            capture_output=True, text=True, timeout=10
+        )
+        total_duration = float(probe.stdout.strip())
+    except Exception:
+        total_duration = 0
+
+    if total_duration > 0 and (trim_start + trim_end) >= total_duration:
+        raise HTTPException(status_code=400, detail="裁剪范围超出音频时长")
+
+    # 使用 ffmpeg 裁剪
+    ext = os.path.splitext(filename)[1]
+    tmp_path = src_path + ".trimmed" + ext
+    cmd = ["ffmpeg", "-y", "-i", src_path]
+    if trim_start > 0:
+        cmd += ["-ss", str(trim_start)]
+    if trim_end > 0 and total_duration > 0:
+        end_time = total_duration - trim_end
+        cmd += ["-to", str(end_time - trim_start)]  # -to is relative to -ss
+    cmd += ["-c", "copy", tmp_path]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            # copy 模式失败时尝试重新编码
+            cmd2 = ["ffmpeg", "-y", "-i", src_path]
+            if trim_start > 0:
+                cmd2 += ["-ss", str(trim_start)]
+            if trim_end > 0 and total_duration > 0:
+                end_time = total_duration - trim_end
+                cmd2 += ["-to", str(end_time - trim_start)]
+            cmd2 += [tmp_path]
+            result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=120)
+            if result2.returncode != 0:
+                raise Exception(result2.stderr)
+
+        # 替换原文件
+        shutil.move(tmp_path, src_path)
+        _save_db()
+        return {"success": True, "data": rec}
+    except Exception as e:
+        # 清理临时文件
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise HTTPException(status_code=500, detail=f"裁剪失败: {str(e)}")
 
 
 # ============ 管理员 - 统计 ============

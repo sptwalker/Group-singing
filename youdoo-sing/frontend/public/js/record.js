@@ -70,7 +70,7 @@
             pitchLabel.textContent = '原调';
             pitchLabel.classList.remove('pitch-shifted');
         } else {
-            pitchLabel.textContent = (val > 0 ? '+' : '') + val + ' \u8c03';
+            pitchLabel.textContent = (val > 0 ? '+' : '') + val + ' 调';
             pitchLabel.classList.add('pitch-shifted');
         }
     }
@@ -86,16 +86,36 @@
     });
     updatePitchLabel();
 
-    // 初始�?
+    // 初始化
+    const isFreeTask = !!segment._isFreeTask;
     recSongName.textContent = song.title;
-    recSegInfo.textContent = `#${segment.index} \u00b7 ${segment.difficulty === 'easy' ? '\u7b80\u5355' : segment.difficulty === 'normal' ? '\u666e\u901a' : '\u56f0\u96be'}${segment.is_chorus ? ' \u00b7 \u5408\u5531\u6bb5' : ''}`;
+    if (isFreeTask) {
+        recSegInfo.textContent = `🎵 自由任务 · ${segment.difficulty === 'easy' ? '简单' : segment.difficulty === 'normal' ? '普通' : '困难'}`;
+    } else {
+        recSegInfo.textContent = `#${segment.index} · ${segment.difficulty === 'easy' ? '简单' : segment.difficulty === 'normal' ? '普通' : '困难'}${segment.is_chorus ? ' · 合唱段' : ''}`;
+    }
 
     const allSegments = song.segments || [];
-    const mySegIdx = allSegments.findIndex(s => s.id === segment.id);
-    // 显示范围：前3�?（共5行）
-    const displayStart = Math.max(0, mySegIdx - 3);
-    const displayEnd = Math.min(allSegments.length - 1, mySegIdx + 1);
-    const displaySegments = allSegments.slice(displayStart, displayEnd + 1);
+    let mySegIdx;
+    let displayStart, displayEnd, displaySegments;
+
+    if (isFreeTask) {
+        mySegIdx = -1; // 自由任务不在唱段列表中
+        // 显示自由任务时间范围附近的歌词（如果有）
+        displayStart = Math.max(0, allSegments.findIndex(s => s.start_time >= segment.start_time) - 2);
+        if (displayStart < 0 && allSegments.length > 0) displayStart = 0;
+        displayEnd = Math.min(allSegments.length - 1, allSegments.findIndex(s => s.start_time >= segment.end_time) + 1);
+        if (displayEnd < displayStart || displayEnd < 0) {
+            displayEnd = Math.min(allSegments.length - 1, displayStart + 4);
+        }
+        displaySegments = allSegments.slice(displayStart, displayEnd + 1);
+    } else {
+        mySegIdx = allSegments.findIndex(s => s.id === segment.id);
+        // 显示范围：前3段+后1段（共5行）
+        displayStart = Math.max(0, mySegIdx - 3);
+        displayEnd = Math.min(allSegments.length - 1, mySegIdx + 1);
+        displaySegments = allSegments.slice(displayStart, displayEnd + 1);
+    }
 
     renderLyrics();
 
@@ -178,7 +198,7 @@
         AudioManager.stop();
         if (isRecording) stopRecording(true);
         releaseMic();
-        if (myRecordings.length > 0 && !confirm('\u6709\u672a\u63d0\u4ea4\u7684\u5f55\u97f3\uff0c\u786e\u5b9a\u8fd4\u56de\uff1f')) return;
+        if (myRecordings.length > 0 && !confirm('有未提交的录音，确定返回？')) return;
         window.location.href = 'task.html';
     });
 
@@ -211,28 +231,36 @@
             AudioManager.stop();
             _stopSyncLoop();
             btnAudition.className = 'btn-record-ctrl btn-audition';
-            btnAudition.textContent = '\u25b6 播放试唱';
+            btnAudition.textContent = '▶ 播放试唱';
             isAuditioning = false;
             clearLyricsHighlight();
             return;
         }
 
         const audioUrl = `${API_BASE.replace('/api', '')}${song.audio_url}`;
-        const previewStart = Math.max(0, mySegIdx - 3);
-        const startTime = allSegments[previewStart].start_time;
-        const endTime = segment.end_time;
+        let startTime, endTime;
+
+        if (isFreeTask) {
+            // 自由任务：从任务开始前5秒播放到结束时间
+            startTime = Math.max(0, segment.start_time - 5);
+            endTime = segment.end_time;
+        } else {
+            const previewStartIdx = Math.max(0, mySegIdx - 3);
+            startTime = allSegments[previewStartIdx].start_time;
+            endTime = segment.end_time;
+        }
 
         AudioManager.playRange(audioUrl, startTime, endTime, () => {
             _stopSyncLoop();
             btnAudition.className = 'btn-record-ctrl btn-audition';
-            btnAudition.textContent = '\u25b6 播放试唱';
+            btnAudition.textContent = '▶ 播放试唱';
             isAuditioning = false;
             clearLyricsHighlight();
         });
 
         _startSyncLoop(curTime => highlightLyrics(curTime));
         btnAudition.className = 'btn-record-ctrl btn-audition playing';
-        btnAudition.textContent = '\u25a0 停止试听';
+        btnAudition.textContent = '■ 停止试听';
         isAuditioning = true;
     });
 
@@ -336,7 +364,7 @@
             AudioManager.stop();
             isAuditioning = false;
             btnAudition.className = 'btn-record-ctrl btn-audition';
-            btnAudition.textContent = '\u25b6 播放试唱';
+            btnAudition.textContent = '▶ 播放试唱';
         }
 
         // 正在停止流程中，忽略点击
@@ -374,6 +402,7 @@
                     echoCancellation: false,
                     noiseSuppression: true,
                     autoGainControl: true,
+                    channelCount: 1,
                 }
             });
         } catch (e) {
@@ -395,12 +424,12 @@
         const waveCd = document.getElementById('liveWaveCountdown');
         wavePanel.style.display = '';
         wavePanel.classList.remove('is-recording');
-        waveLabel.textContent = '\u8bf7\u51c6\u5907';
+        waveLabel.textContent = '请准备';
         waveCd.textContent = '';
         _recPreparing = true;
         btnRecord.disabled = false;
         btnRecord.className = 'btn-record-ctrl btn-record recording';
-        btnRecord.textContent = '\u23f9 \u53d6\u6d88';
+        btnRecord.textContent = '⏹ 取消';
         btnAudition.disabled = true;
 
         // 启动麦克风波形（静默状态也有微弱波形）
@@ -421,7 +450,7 @@
                 if (wp) { wp.style.display = 'none'; wp.classList.remove('is-recording'); }
                 _recPreparing = false;
                 btnRecord.className = 'btn-record-ctrl btn-record';
-                btnRecord.textContent = '\ud83c\udfa4 \u5f55\u97f3';
+                btnRecord.textContent = '🎤 录音';
                 btnAudition.disabled = false;
                 releaseMic();
             }
@@ -435,24 +464,29 @@
         const recAudioUrl = _hasAcc
             ? `${baseUrl}${song.accompaniment_url}`
             : `${baseUrl}${song.audio_url}`;
-        // 计算播放起始点：从前两句歌词开�?
-        const leadSegs = 2;  // 提前播放的句�?
-        const leadSegIdx = Math.max(0, mySegIdx - leadSegs);
-        const leadSegStart = allSegments[leadSegIdx].start_time;
-        const gapToLead = segment.start_time - leadSegStart;
-        // 如果前两句距�?1秒或>15秒（太远），则从3秒前开�?
-        const maxLeadIn = 3;
-        let playStart;
-        if (mySegIdx === 0 || gapToLead < 1 || gapToLead > 15) {
+        // 计算播放起始点：自由任务从3秒前开始，普通唱段从前两句歌词开始
+        let playStart, leadTime;
+        if (isFreeTask) {
+            const maxLeadIn = 3;
             playStart = Math.max(0, segment.start_time - maxLeadIn);
+            leadTime = segment.start_time - playStart;
         } else {
-            playStart = leadSegStart;
+            const leadSegs = 2;
+            const leadSegIdx = Math.max(0, mySegIdx - leadSegs);
+            const leadSegStart = allSegments[leadSegIdx].start_time;
+            const gapToLead = segment.start_time - leadSegStart;
+            const maxLeadIn = 3;
+            if (mySegIdx === 0 || gapToLead < 1 || gapToLead > 15) {
+                playStart = Math.max(0, segment.start_time - maxLeadIn);
+            } else {
+                playStart = leadSegStart;
+            }
+            leadTime = segment.start_time - playStart;
         }
-        const leadTime = segment.start_time - playStart;
 
         showArrowIndicators();
 
-        waveLabel.textContent = leadTime > 3 ? '\u524d\u594f\u51c6\u5907' : '\u8bf7\u51c6\u5907';
+        waveLabel.textContent = leadTime > 3 ? '前奏准备' : '请准备';
 
         // 设置安全兜底定时器：无论如何，到�?end_time 后一定停�?
         if (_autoStopTimer) clearTimeout(_autoStopTimer);
@@ -503,11 +537,11 @@
             if (curTime >= segment.start_time - 0.3 && _recPreparing && !isRecording) {
                 _recPreparing = false;
                 wavePanel.classList.add('is-recording');
-                waveLabel.textContent = '\u25cf \u5f55\u97f3\u4e2d';
+                waveLabel.textContent = '● 录音中';
                 waveCd.textContent = '';
                 btnRecord.disabled = false;
                 btnRecord.className = 'btn-record-ctrl btn-record recording';
-                btnRecord.textContent = '\u23f9 \u505c\u6b62\u5f55\u97f3';
+                btnRecord.textContent = '⏹ 停止录音';
                 // 演唱歌词变亮
                 const myLine = lyricsSection.querySelector('.my-singing-line');
                 if (myLine) myLine.classList.add('singing-now');
@@ -580,7 +614,7 @@
         const tracks = recStream.getAudioTracks();
         if (tracks.length === 0 || tracks[0].readyState !== 'live') {
             console.error('[录音] 音频 track 已失效', tracks.length > 0 ? tracks[0].readyState : 'no tracks');
-            showToast('\u9ea6\u514b\u98ce\u8fde\u63a5\u4e22\u5931\uff0c\u8bf7\u91cd\u8bd5');
+            showToast('麦克风连接丢失，请重试');
             return;
         }
         try {
@@ -619,7 +653,7 @@
 
         } catch (e) {
             console.error('[录音] MediaRecorder启动失败:', e);
-            showToast('\u5f55\u97f3\u542f\u52a8\u5931\u8d25\uff1a' + e.message);
+            showToast('录音启动失败：' + e.message);
             isRecording = false;
         }
     }
@@ -924,7 +958,7 @@
             for (let j = 0; j < frameSize; j++) sum += data[i + j] * data[i + j];
             frames.push(Math.sqrt(sum / frameSize));
         }
-        if (frames.length === 0) return { score: 0, detail: '\u65e0\u97f3\u9891\u6570\u636e' };
+        if (frames.length === 0) return { score: 0, detail: '无音频数据' };
 
         // 整体 RMS
         const avgRMS = frames.reduce((a, b) => a + b, 0) / frames.length;
@@ -965,8 +999,8 @@
 
             score = Math.round(levelScore * 0.35 + stabilityScore * 0.35 + coverageScore * 0.3);
 
-            if (avgRMS < 0.03) detail = '\u97f3\u91cf\u504f\u4f4e\uff0c\u53ef\u9760\u8fd1\u9ea6\u514b\u98ce';
-            else if (avgRMS > 0.5) detail = '\u97f3\u91cf\u504f\u5927\uff0c\u6ce8\u610f\u63a7\u5236\u6c14\u606f';
+            if (avgRMS < 0.03) detail = '音量偏低，可靠近麦克风';
+            else if (avgRMS > 0.5) detail = '音量偏大，注意控制气息';
             else if (cv > 0.6) detail = '音量起伏较大';
             else if (activeRatio < 0.4) detail = '演唱间断较多';
             else detail = '音量控制良好';
@@ -993,7 +1027,7 @@
         }
 
         if (pitches.length < 5) {
-            return { score: 30, detail: '\u672a\u68c0\u6d4b\u5230\u8db3\u591f\u7684\u97f3\u9ad8\u4fe1\u606f' };
+            return { score: 30, detail: '未检测到足够的音高信息' };
         }
 
         // 将音高转�?MIDI 半音（对数域），分析稳定�?
@@ -1032,10 +1066,10 @@
         else score += 12;
 
         let detail;
-        if (score >= 80) detail = '\u97f3\u51c6\u7a33\u5b9a\uff0c\u8868\u73b0\u51fa\u8272';
-        else if (score >= 60) detail = '\u97f3\u51c6\u8f83\u597d\uff0c\u5076\u6709\u504f\u5dee';
+        if (score >= 80) detail = '音准稳定，表现出色';
+        else if (score >= 60) detail = '音准较好，偶有偏差';
         else if (score >= 40) detail = '音准有波动，可多练习';
-        else detail = '\u97f3\u51c6\u9700\u8981\u52a0\u5f3a\u7ec3\u4e60';
+        else detail = '音准需要加强练习';
 
         return { score: Math.min(100, Math.max(0, score)), detail };
     }
@@ -1110,10 +1144,10 @@
             const avgIntervalMs = meanInt * 30; // 30ms per frame
             if (avgIntervalMs >= 200 && avgIntervalMs <= 800) rhythmScore = Math.min(100, rhythmScore + 5);
 
-            if (rhythmScore >= 80) detail = '\u8282\u594f\u7a33\u5b9a\uff0c\u628a\u63e1\u51c6\u786e';
-            else if (rhythmScore >= 60) detail = '\u8282\u594f\u611f\u8f83\u597d';
+            if (rhythmScore >= 80) detail = '节奏稳定，把握准确';
+            else if (rhythmScore >= 60) detail = '节奏感较好';
             else if (rhythmScore >= 45) detail = '节奏有些不稳';
-            else detail = '\u8282\u594f\u9700\u8981\u52a0\u5f3a';
+            else detail = '节奏需要加强';
         } else {
             rhythmScore = 55;
             detail = '节奏点较少，演唱较平';
@@ -1183,8 +1217,8 @@
         let detail;
         if (score >= 80) detail = '音色饱满清亮';
         else if (score >= 60) detail = '音色较好';
-        else if (score >= 45) detail = '\u97f3\u8272\u8868\u73b0\u4e00\u822c';
-        else detail = '\u53ef\u6ce8\u610f\u53d1\u58f0\u6280\u5de7';
+        else if (score >= 45) detail = '音色表现一般';
+        else detail = '可注意发声技巧';
 
         return { score: Math.min(100, Math.max(0, score)), detail };
     }
@@ -1382,7 +1416,8 @@
             rec._ws.stop();
         }
         _recPlaying = false;
-        btnRecPlay.textContent = '\u25b6 播放';
+        btnRecPlay.textContent = '▶ 播放';
+        btnRecPlay.classList.remove('playing');
     }
 
     btnRecPlay.addEventListener('click', () => {
@@ -1398,19 +1433,21 @@
         AudioManager.stop();
 
         if (!rec._ws) {
-            showToast('\u6ce2\u5f62\u672a\u5c31\u7eea');
+            showToast('波形未就绪');
             return;
         }
 
         rec._ws.un('finish');
         rec._ws.on('finish', () => {
             _recPlaying = false;
-            btnRecPlay.textContent = '\u25b6 \u64ad\u653e';
+            btnRecPlay.textContent = '▶ 播放';
+            btnRecPlay.classList.remove('playing');
         });
 
         rec._ws.play();
         _recPlaying = true;
-        btnRecPlay.textContent = '\u23f9 \u505c\u6b62';
+        btnRecPlay.textContent = '⏹ 停止';
+        btnRecPlay.classList.add('playing');
     });
 
     // 删除选中录音
@@ -1425,7 +1462,7 @@
         myRecordings.forEach((r, i) => r.index = i + 1);
         selectedRecIndex = -1;
         renderMyRecordings();
-        showToast('\u5df2\u5220\u9664');
+        showToast('已删除');
     });
 
     // 提交选中录音
@@ -1436,7 +1473,7 @@
         _stopRecPlayback();
         AudioManager.stop();
 
-        btnRecSubmit.textContent = '\u63d0\u4ea4\u4e2d...';
+        btnRecSubmit.textContent = '提交中...';
         btnRecSubmit.disabled = true;
 
         try {
@@ -1459,7 +1496,7 @@
             const submitRes = await apiPost(`/recordings/${uploadRes.data.id}/submit`, new FormData());
             if (!submitRes.success) throw new Error('提交失败');
 
-            showToast('\u63d0\u4ea4\u6210\u529f');
+            showToast('提交成功');
 
             myRecordings.forEach(r => {
                 if (r.url) URL.revokeObjectURL(r.url);
@@ -1472,8 +1509,8 @@
             }, 800);
 
         } catch (e) {
-            showToast('\u63d0\u4ea4\u5931\u8d25\uff1a' + e.message);
-            btnRecSubmit.textContent = '\u63d0\u4ea4';
+            showToast('提交失败：' + e.message);
+            btnRecSubmit.textContent = '提交';
             btnRecSubmit.disabled = false;
         }
     });

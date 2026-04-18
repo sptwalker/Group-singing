@@ -66,7 +66,7 @@
             }
             loadSong(0);
         } catch (e) {
-            showToast('\u52a0\u8f7d\u5931\u8d25\uff1a' + e.message);
+            showToast('加载失败：' + e.message);
         }
     }
 
@@ -78,7 +78,7 @@
             currentSong = res.data;
         } catch (e) {
             console.error('[task] loadSong API error:', e);
-            showToast('\u52a0\u8f7d\u6b4c\u66f2\u5931\u8d25\uff1a' + e.message);
+            showToast('加载歌曲失败：' + e.message);
             return;
         }
         try {
@@ -91,7 +91,7 @@
             loadRecordings();
         } catch (e) {
             console.error('[task] renderSong error:', e);
-            showToast('\u6e32\u67d3\u5931\u8d25\uff1a' + e.message);
+            showToast('渲染失败：' + e.message);
         }
     }
 
@@ -165,7 +165,7 @@
             <div class="published-banner">
                 <div class="published-badge">全曲已完成，请欣赏！</div>
                 <div class="published-player">
-                    <button class="published-play-btn" id="pubPlayBtn">�?/button>
+                    <button class="published-play-btn" id="pubPlayBtn">▶</button>
                     <div class="published-info-col">
                         <canvas class="published-wave-canvas" id="pubWaveCanvas" width="800" height="44"></canvas>
                         <div class="published-progress-row">
@@ -175,7 +175,7 @@
                             <span class="published-time" id="pubTimeLabel">0:00 / ${formatTime(pf.duration || 0)}</span>
                         </div>
                     </div>
-                    <a class="published-download-btn" href="${finalAudioUrl}" download title="下载">�?/a>
+                    <a class="published-download-btn" href="${finalAudioUrl}" download title="下载">⬇</a>
                 </div>
             </div>`;
 
@@ -186,13 +186,13 @@
         pubPlayBtn.addEventListener('click', () => {
             if (_publishedAudio && !_publishedAudio.paused) {
                 _publishedAudio.pause();
-                pubPlayBtn.textContent = '\u25b6';
+                pubPlayBtn.textContent = '▶';
                 pubPlayBtn.classList.remove('playing');
                 return;
             }
             if (_publishedAudio && _publishedAudio.paused && _publishedAudio.currentTime > 0) {
                 _publishedAudio.play();
-                pubPlayBtn.textContent = '\u23f8';
+                pubPlayBtn.textContent = '⏸';
                 pubPlayBtn.classList.add('playing');
                 _startPublishedTick();
                 _startPublishedWave();
@@ -222,7 +222,7 @@
             }, { once: true });
 
             audio.addEventListener('ended', () => {
-                pubPlayBtn.textContent = '\u25b6';
+                pubPlayBtn.textContent = '▶';
                 pubPlayBtn.classList.remove('playing');
                 _stopPublishedPlayback();
                 const fill = document.getElementById('pubProgressFill');
@@ -232,7 +232,7 @@
             });
 
             audio.play().catch(() => {});
-            pubPlayBtn.textContent = '\u23f8';
+            pubPlayBtn.textContent = '⏸';
             pubPlayBtn.classList.add('playing');
             _startPublishedTick();
             _startPublishedWave();
@@ -309,7 +309,7 @@
         navNext.style.display = '';
         const recHeader = document.querySelector('.recordings-header');
         if (recHeader) {
-            recHeader.querySelector('.recordings-title').textContent = '\ud83c\udfa7 \u5927\u5bb6\u7684\u5f55\u97f3';
+            recHeader.querySelector('.recordings-title').textContent = '🎧 大家的录音';
             const sortTabs = recHeader.querySelector('.sort-tabs');
             if (sortTabs) sortTabs.style.display = '';
         }
@@ -330,12 +330,13 @@
     // ===== 歌词任务列表 =====
     function renderLyricsTaskList() {
         const segs = currentSong.segments || [];
+        const freeTasks = currentSong.free_tasks || [];
         expandedSegId = null;
 
-        lyricsTaskList.innerHTML = segs.map((seg, i) => {
+        let html = segs.map((seg, i) => {
             const isCompleted = seg.status === 'completed';
             const submitCount = seg.submit_count || 0;
-            const diffLabels = { easy: '\u7b80', normal: '\u4e2d', hard: '\u96be' };
+            const diffLabels = { easy: '简', normal: '中', hard: '难' };
             const diffCls = seg.difficulty;
 
             return `
@@ -343,22 +344,64 @@
                     <div class="lyric-task-main">
                         <span class="lyric-task-num">${seg.index}</span>
                         <span class="lyric-task-diff diff-${diffCls}">${diffLabels[seg.difficulty]}</span>
-                        ${seg.is_chorus ? '<span class="lyric-task-chorus">\u5408\u5531</span>' : ''}
+                        ${seg.is_chorus ? '<span class="lyric-task-chorus">合唱</span>' : ''}
                         <span class="lyric-task-text">${seg.lyrics || '...'}</span>
                         <span class="lyric-task-count ${submitCount > 0 ? 'has-submit' : ''}">${submitCount}人次</span>
                     </div>
                     <div class="lyric-task-expand" data-seg-id="${seg.id}" style="display:none;">
-                        <button class="lyric-task-btn btn-lt-play" data-seg-id="${seg.id}">\u25b6 \u8bd5\u542c</button>
-                        <button class="lyric-task-btn btn-lt-record ${isCompleted ? 'disabled' : ''}" data-seg-id="${seg.id}" ${isCompleted ? 'disabled' : ''}>\ud83c\udfa4 \u5f55\u97f3</button>
+                        <button class="lyric-task-btn btn-lt-play" data-seg-id="${seg.id}">▶ 试听</button>
+                        <button class="lyric-task-btn btn-lt-record ${isCompleted ? 'disabled' : ''}" data-seg-id="${seg.id}" ${isCompleted ? 'disabled' : ''}>🎤 录音</button>
                     </div>
                 </div>
             `;
         }).join('');
 
+        // 自由任务（排在唱段之后）
+        if (freeTasks.length > 0) {
+            html += `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text-secondary);">🎵 自由任务</div>`;
+            html += freeTasks.map((ft, fi) => {
+                const diffLabels = { easy: '简', normal: '中', hard: '难' };
+                return `
+                    <div class="lyric-task-item lyric-task-free" data-ft-id="${ft.id}" data-ft-idx="${fi}">
+                        <div class="lyric-task-main">
+                            <span class="lyric-task-num" style="background:#16a34a;">F</span>
+                            <span class="lyric-task-diff diff-${ft.difficulty}">${diffLabels[ft.difficulty]}</span>
+                            <span class="lyric-task-text">${ft.description || '自由任务'}</span>
+                            <span class="lyric-task-text" style="font-size:11px;color:var(--text-light);font-family:monospace;">${formatTime(ft.start_time)}→${formatTime(ft.end_time)}</span>
+                        </div>
+                        <div class="lyric-task-expand" data-ft-id="${ft.id}" style="display:none;">
+                            <button class="lyric-task-btn btn-ft-preview" data-ft-idx="${fi}">▶ 试唱预览</button>
+                            <button class="lyric-task-btn btn-ft-record" data-ft-idx="${fi}">🎤 录音</button>
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+
+        lyricsTaskList.innerHTML = html;
+
         // 绑定点击
-        lyricsTaskList.querySelectorAll('.lyric-task-item').forEach(item => {
+        lyricsTaskList.querySelectorAll('.lyric-task-item:not(.lyric-task-free)').forEach(item => {
             item.querySelector('.lyric-task-main').addEventListener('click', () => {
                 onLyricItemClick(item);
+            });
+        });
+        // 自由任务点击展开
+        lyricsTaskList.querySelectorAll('.lyric-task-free .lyric-task-main').forEach(el => {
+            el.addEventListener('click', () => {
+                const parent = el.closest('.lyric-task-free');
+                const expandEl = parent.querySelector('.lyric-task-expand');
+                const isExpanded = parent.classList.contains('expanded');
+                lyricsTaskList.querySelectorAll('.lyric-task-item').forEach(it => {
+                    it.classList.remove('expanded');
+                    it.querySelector('.lyric-task-expand').style.display = 'none';
+                });
+                if (isExpanded) {
+                    parent.classList.remove('expanded');
+                    expandEl.style.display = 'none';
+                } else {
+                    parent.classList.add('expanded');
+                    expandEl.style.display = 'flex';
+                }
             });
         });
 
@@ -376,6 +419,20 @@
                 e.stopPropagation();
                 if (btn.disabled) return;
                 onLyricRecord(btn);
+            });
+        });
+
+        // 绑定自由任务按钮
+        lyricsTaskList.querySelectorAll('.btn-ft-preview').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                onFreeTaskPreview(btn);
+            });
+        });
+        lyricsTaskList.querySelectorAll('.btn-ft-record').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                onFreeTaskRecord(parseInt(btn.dataset.ftIdx));
             });
         });
     }
@@ -422,14 +479,14 @@
 
         if (btn.classList.contains('playing')) {
             AudioManager.stop();
-            btn.textContent = '�?试听';
+            btn.textContent = '▶ 试听';
             btn.classList.remove('playing');
             return;
         }
 
         // 停止其他播放按钮
         lyricsTaskList.querySelectorAll('.btn-lt-play.playing').forEach(b => {
-            b.textContent = '�?试听';
+            b.textContent = '▶ 试听';
             b.classList.remove('playing');
         });
         resetPlayButtons();
@@ -439,7 +496,7 @@
         ensureVisualizer(audioUrl);
         AudioManager.playRange(audioUrl, seg.start_time, seg.end_time,
             () => {
-                btn.textContent = '�?试听';
+                btn.textContent = '▶ 试听';
                 btn.classList.remove('playing');
                 if (_visualizerWS) _visualizerWS.seekTo(0);
             },
@@ -449,7 +506,7 @@
                 }
             }
         );
-        btn.textContent = '�?停止';
+        btn.textContent = '■ 停止';
         btn.classList.add('playing');
     }
 
@@ -475,8 +532,72 @@
             localStorage.setItem('youdoo_record_song', JSON.stringify(currentSong));
             window.location.href = 'record.html';
         } catch (e) {
-            showToast('\u8ba4\u9886\u5931\u8d25\uff1a' + e.message);
+            showToast('认领失败：' + e.message);
         }
+    }
+
+    // ===== 自由任务处理 =====
+    function onFreeTaskPreview(btn) {
+        const ftIdx = parseInt(btn.dataset.ftIdx);
+        const ft = (currentSong.free_tasks || [])[ftIdx];
+        if (!ft) return;
+
+        if (btn.classList.contains('playing')) {
+            AudioManager.stop();
+            btn.textContent = '▶ 试唱预览';
+            btn.classList.remove('playing');
+            return;
+        }
+
+        lyricsTaskList.querySelectorAll('.btn-ft-preview.playing').forEach(b => {
+            b.textContent = '▶ 试唱预览';
+            b.classList.remove('playing');
+        });
+        resetPlayButtons();
+        isFullPlaying = false;
+
+        // 试唱预览：从任务开始前5秒播放到结束时间
+        const audioUrl = `${API_BASE.replace('/api', '')}${currentSong.audio_url}`;
+        const previewStart = Math.max(0, ft.start_time - 5);
+
+        ensureVisualizer(audioUrl);
+        AudioManager.playRange(audioUrl, previewStart, ft.end_time,
+            () => {
+                btn.textContent = '▶ 试唱预览';
+                btn.classList.remove('playing');
+                if (_visualizerWS) _visualizerWS.seekTo(0);
+            },
+            (cur, dur) => {
+                if (_visualizerWS && _visualizerWS.getDuration() > 0) {
+                    _visualizerWS.seekTo(cur / _visualizerWS.getDuration());
+                }
+            }
+        );
+        btn.textContent = '■ 停止';
+        btn.classList.add('playing');
+    }
+
+    function onFreeTaskRecord(ftIdx) {
+        const ft = (currentSong.free_tasks || [])[ftIdx];
+        if (!ft) return;
+        const currentUser = requireUser('Please sign in before recording a free task');
+        if (!currentUser) return;
+
+        // 构造一个类似segment的对象供record.js使用
+        const freeSegObj = {
+            id: ft.id,
+            index: 'F',
+            lyrics: ft.description || '自由任务',
+            is_chorus: ft.type === 'chorus',
+            difficulty: ft.difficulty || 'normal',
+            start_time: ft.start_time,
+            end_time: ft.end_time,
+            status: 'free_task',
+            _isFreeTask: true,
+        };
+        localStorage.setItem('youdoo_record_segment', JSON.stringify(freeSegObj));
+        localStorage.setItem('youdoo_record_song', JSON.stringify(currentSong));
+        window.location.href = 'record.html';
     }
 
     // ===== 整曲播放控制 =====
@@ -517,14 +638,14 @@
         // 当前正在播放 �?暂停
         if (audio && isFullPlaying && !audio.paused) {
             audio.pause();
-            btnPlayPause.textContent = '\u25b6';
+            btnPlayPause.textContent = '▶';
             btnPlayPause.classList.remove('active');
             return;
         }
-        // 当前已暂�?�?恢复
+        // 当前已暂停 → 恢复
         if (audio && isFullPlaying && audio.paused) {
             audio.play();
-            btnPlayPause.textContent = '\u23f8';
+            btnPlayPause.textContent = '⏸';
             btnPlayPause.classList.add('active');
             return;
         }
@@ -547,7 +668,7 @@
             }
         );
         isFullPlaying = true;
-        btnPlayPause.textContent = '\u23f8';
+        btnPlayPause.textContent = '⏸';
         btnPlayPause.classList.add('active');
     });
 
@@ -570,7 +691,7 @@
     });
 
     function resetPlayButtons() {
-        btnPlayPause.textContent = '\u25b6';
+        btnPlayPause.textContent = '▶';
         btnPlayPause.classList.remove('active');
     }
 
@@ -585,7 +706,7 @@
             fd.append('user_name', currentUser.nickname);
             const res = await apiPost('/segments/random-claim', fd);
             if (res.success) {
-                showToast('\u968f\u673a\u8ba4\u9886\u6210\u529f');
+                showToast('随机认领成功');
                 const seg = res.data;
                 localStorage.setItem('youdoo_record_segment', JSON.stringify(seg));
                 localStorage.setItem('youdoo_record_song', JSON.stringify(currentSong));
@@ -594,7 +715,7 @@
                 }, 300);
             }
         } catch (e) {
-            showToast('\u968f\u673a\u8ba4\u9886\u5931\u8d25\uff1a' + e.message);
+            showToast('随机认领失败：' + e.message);
         }
     });
 
@@ -652,7 +773,7 @@
         if (resetButton) {
             const prevBtn = recordingList.querySelector(`.btn-play-mini[data-rec-idx="${_playingIdx}"]`);
             if (prevBtn) {
-                prevBtn.textContent = '\u25b6';
+                prevBtn.textContent = '▶';
                 prevBtn.classList.remove('playing');
             }
         }
@@ -708,7 +829,7 @@
         }
 
         if (list.length === 0) {
-            recordingList.innerHTML = '<div class="empty-recordings">\u8fd8\u6ca1\u6709\u4eba\u63d0\u4ea4\u5f55\u97f3\uff0c\u5feb\u6765\u7b2c\u4e00\u4e2a\u5427</div>';
+            recordingList.innerHTML = '<div class="empty-recordings">还没有人提交录音，快来第一个吧</div>';
             return;
         }
 
@@ -736,11 +857,11 @@
                             <div class="rec-seg-num">#${seg ? seg.index : '?'} ${seg ? seg.lyrics : ''}</div>
                         </div>
                         <div class="rec-like" data-id="${rec.id}">
-                            \u2764<span>${rec.likes}</span>
+                            ❤<span>${rec.likes}</span>
                         </div>
                     </div>
                     <div class="rec-card-bottom">
-                        <button class="btn-play-mini" data-rec-idx="${i}">\u25b6</button>
+                        <button class="btn-play-mini" data-rec-idx="${i}">▶</button>
                         <div class="rec-wave-container" id="taskRecW${i}"></div>
                     </div>
                 </div>
@@ -787,12 +908,12 @@
                 if (!ws) return;
                 ws.un('finish');
                 ws.on('finish', () => {
-                    btn.textContent = '\u25b6';
+                    btn.textContent = '▶';
                     btn.classList.remove('playing');
                     _playingIdx = -1;
                 });
                 ws.play();
-                btn.textContent = '\u23f8';
+                btn.textContent = '⏸';
                 btn.classList.add('playing');
                 _playingIdx = idx;
             });

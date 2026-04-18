@@ -342,7 +342,10 @@
 .my-recordings-section {
     padding: 0 14px 8px;
     margin-top: 12px;
-    flex-shrink: 0;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 .my-rec-title {
     font-size: 18px;
@@ -575,6 +578,10 @@
 .btn-rec-play {
     background: rgba(255,255,255,0.12);
     color: #fff;
+}
+.btn-rec-play.playing {
+    background: rgba(7,193,96,0.3);
+    color: #07c160;
 }
 .btn-rec-delete {
     background: rgba(239,68,68,0.2);

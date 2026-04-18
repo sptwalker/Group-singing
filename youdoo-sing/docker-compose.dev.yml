@@ -11,6 +11,7 @@ services:
       - ./backend/.env
     ports:
       - "8000:8000"
+    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     volumes:
       # 开发模式：直接挂载本地目录，代码修改即时生效
       - ./backend:/app/backend

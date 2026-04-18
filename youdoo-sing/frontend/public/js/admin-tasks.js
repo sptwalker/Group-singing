@@ -18,14 +18,21 @@ async function renderTasks(container) {
             <span id="taskFilterInfo" style="font-size:12px;color:var(--text-secondary);"></span>
         </div>
         <div class="card">
-            <div class="card-header"><h3>唱段任务</h3><span id="taskSegHint" style="font-size:12px;color:var(--text-light);">点击行查看录音</span></div>
+            <div class="card-header">
+                <h3>唱段任务</h3>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span id="taskSegHint" style="font-size:12px;color:var(--text-light);">点击行查看录音</span>
+                    <button class="btn btn-primary btn-sm" id="btnAddFreeTask" style="display:none;">+ 新增自由任务</button>
+                </div>
+            </div>
             <div class="card-body" style="padding:0;">
-                <div class="table-wrap"><table id="taskTable">
+                <div class="table-wrap task-seg-scroll"><table id="taskTable">
                     <thead><tr><th>#</th><th>歌曲</th><th>歌词</th><th>类型</th><th>时间</th><th>难度</th><th>认领</th><th>录音</th><th>操作</th></tr></thead>
                     <tbody id="taskTableBody"></tbody>
                 </table></div>
             </div>
         </div>
+        <div id="taskStatsPanel" style="display:none;"></div>
         <div class="card" style="margin-top:20px;">
             <div class="card-header"><h3 id="recTableTitle">录音提交</h3><span id="recTableHint" style="font-size:12px;color:var(--text-light);">请先选择上方唱段</span></div>
             <div class="card-body" style="padding:0;">
@@ -43,6 +50,7 @@ async function renderTasks(container) {
             _taskSelectedSegId = null;
             loadTaskSegments();
         });
+        document.getElementById('btnAddFreeTask').addEventListener('click', () => _showFreeTaskDialog());
         loadTaskSegments();
     } catch (e) { container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>${e.message}</p></div>`; }
 }
@@ -51,16 +59,48 @@ async function loadTaskSegments() {
     const songId = document.getElementById('taskSongSelect').value;
     try {
         _taskAllSegs = [];
+        let currentSongData = null;
         const filteredSongs = songId ? _taskSongs.filter(s => s.id === songId) : _taskSongs;
         for (const s of filteredSongs) {
             const r = await aGet(`/admin/songs/${s.id}`);
+            if (s.id === songId) currentSongData = r.data;
             (r.data.segments || []).forEach(seg => _taskAllSegs.push({ ...seg, songTitle: s.title, songId: s.id }));
+            // 加载自由任务
+            if (r.data.free_tasks) {
+                (r.data.free_tasks || []).forEach(ft => _taskAllSegs.push({
+                    id: ft.id, index: 'F', lyrics: ft.description || '自由任务',
+                    is_chorus: false, difficulty: ft.difficulty || 'normal',
+                    start_time: ft.start_time, end_time: ft.end_time,
+                    claim_count: 0, recordings: ft.recordings || [], status: 'free_task',
+                    songTitle: s.title, songId: s.id, _isFreeTask: true, _freeTask: ft,
+                }));
+            }
         }
+
+        // 控制新增自由任务按钮显示（仅选中单首歌曲时）
+        const btnAddFree = document.getElementById('btnAddFreeTask');
+        if (btnAddFree) btnAddFree.style.display = (songId && currentSongData) ? '' : 'none';
+
         const tbody = document.getElementById('taskTableBody');
         document.getElementById('taskFilterInfo').textContent = `${_taskAllSegs.length} 个唱段`;
 
         tbody.innerHTML = _taskAllSegs.map(seg => {
             const isActive = seg.id === _taskSelectedSegId;
+            if (seg._isFreeTask) {
+                return `<tr class="task-seg-row task-seg-free${isActive ? ' task-seg-active' : ''}" data-seg-id="${seg.id}" data-is-chorus="0" data-is-free="1">
+                <td><span title="自由任务">F</span></td>
+                <td>${seg.songTitle}</td>
+                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🎵 ${seg.lyrics||'--'}</td>
+                <td><span class="badge badge-free">自由</span></td>
+                <td style="font-family:monospace;font-size:12px;">${fmtTimePrecise(seg.start_time)}→${fmtTimePrecise(seg.end_time)}</td>
+                <td><span class="badge badge-${seg.difficulty}">${seg.difficulty}</span></td>
+                <td>--</td>
+                <td>${(seg.recordings||[]).length} 条</td>
+                <td>
+                    <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteFreeTask('${seg.songId}','${seg.id}')">删除</button>
+                </td>
+            </tr>`;
+            }
             return `<tr class="task-seg-row${isActive ? ' task-seg-active' : ''}" data-seg-id="${seg.id}" data-is-chorus="${seg.is_chorus ? '1' : '0'}">
             <td>${seg.index}</td>
             <td>${seg.songTitle}</td>
@@ -84,6 +124,7 @@ async function loadTaskSegments() {
             row.addEventListener('click', () => {
                 const segId = row.dataset.segId;
                 const isChorus = row.dataset.isChorus === '1';
+                const isFree = row.dataset.isFree === '1';
                 // 切换选中
                 if (_taskSelectedSegId === segId) {
                     _taskSelectedSegId = null;
@@ -94,19 +135,169 @@ async function loadTaskSegments() {
                     _taskSelectedSegId = segId;
                     _taskSelectedIsChorus = isChorus;
                     tbody.querySelectorAll('.task-seg-row').forEach(r => r.classList.toggle('task-seg-active', r.dataset.segId === segId));
-                    loadRecordingsForSeg(segId, isChorus);
+                    if (isFree) loadRecordingsForFreeTask(segId, songId);
+                    else loadRecordingsForSeg(segId, isChorus);
                 }
             });
         });
 
+        // 渲染统计信息面板
+        _renderTaskStats(songId, currentSongData);
+
         // 如果有选中的唱段，刷新录音
         if (_taskSelectedSegId) {
             const seg = _taskAllSegs.find(s => s.id === _taskSelectedSegId);
-            if (seg) loadRecordingsForSeg(_taskSelectedSegId, seg.is_chorus);
+            if (seg) {
+                if (seg._isFreeTask) loadRecordingsForFreeTask(_taskSelectedSegId, songId);
+                else loadRecordingsForSeg(_taskSelectedSegId, seg.is_chorus);
+            }
             else clearRecTable();
         } else {
             clearRecTable();
         }
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ===== 统计信息 =====
+async function _renderTaskStats(songId, songData) {
+    const panel = document.getElementById('taskStatsPanel');
+    if (!panel || !songId || !songData) { if (panel) panel.style.display='none'; return; }
+    try {
+        const recRes = await aGet(`/admin/recordings?song_id=${songId}`);
+        const allRecs = recRes.data || [];
+        const submittedRecs = allRecs.filter(r => r.submitted);
+
+        // 参与人数
+        const participantSet = new Set(submittedRecs.map(r => r.user_id));
+        const participantCount = participantSet.size;
+
+        // 有提交的唱段数
+        const submittedSegIds = new Set(submittedRecs.map(r => r.segment_id));
+        const normalSegs = (songData.segments || []).filter(s => !s._isFreeTask);
+        const submittedSegCount = normalSegs.filter(s =>
+            submittedSegIds.has(s.id) || s.status === 'completed'
+        ).length;
+
+        // 提交总数
+        const totalCount = submittedRecs.length;
+
+        // Top 3 用户
+        const userCounts = {};
+        submittedRecs.forEach(r => {
+            userCounts[r.user_name] = (userCounts[r.user_name] || 0) + 1;
+        });
+        const topUsers = Object.entries(userCounts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3);
+
+        panel.style.display = '';
+        panel.innerHTML = `
+        <div class="task-stats-panel card" style="margin-top:16px;">
+            <div style="display:flex;gap:20px;flex-wrap:wrap;padding:10px 14px;font-size:13px;">
+                <div><b>参与人数：</b><span style="color:var(--primary);">${participantCount}</span> 人</div>
+                <div><b>已交唱段：</b><span style="color:#059669;">${submittedSegCount}/${normalSegs.length}</span> 段</div>
+                <div><b>提交总数：</b><span style="color:#d97706;">${totalCount}</span> 条</div>
+                ${topUsers.length > 0 ? `<div><b>活跃TOP3：</b>${topUsers.map(([name,c])=>`<span class="badge badge-unassigned" style="margin-left:4px;">${name}(${c})</span>`).join('')}</div>` : ''}
+            </div>
+        </div>`;
+    } catch(e) { panel.style.display='none'; }
+}
+
+// ===== 自由任务管理 =====
+function _showFreeTaskDialog() {
+    const songId = document.getElementById('taskSongSelect').value;
+    if (!songId) return;
+    window._ftSongId = songId;
+    showModal('新增自由任务', `
+        <div style="display:flex;flex-direction:column;gap:12px;">
+            <div><label>描述文字：</label><input type="text" id="ftDesc" placeholder="例如：副歌高音部分" value="" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;"></div>
+            <div style="display:flex;gap:8px;"><div style="flex:1;">
+                <label>开始时间（秒）：</label><input type="number" id="ftStart" min="0" step="0.5" value="0" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;"></div>
+                <div style="flex:1;">
+                <label>结束时间（秒）：</label><input type="number" id="ftEnd" min="0" step="0.5" value="10" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;"></div>
+            </div>
+            <div style="display:flex;gap:8px;"><div style="flex:1;">
+                <label>难度：</label><select id="ftDiff" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;">
+                    <option value="easy">简</option>
+                    <option value="normal" selected>中</option>
+                    <option value="hard">难</option>
+                </select></div>
+                <div style="flex:1;">
+                <label>类型：</label><select id="ftType" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;">
+                    <option value="solo">独唱</option>
+                    <option value="chorus">合唱</option>
+                </select></div>
+            </div>
+            <p id="ftError" style="color:#ef4444;font-size:12px;display:none;margin:0;"></p>
+        </div>
+    `, `<button class="btn-login" id="btnFtCreate">创 建</button>`);
+    document.getElementById('btnFtCreate').addEventListener('click', async () => {
+        const desc = document.getElementById('ftDesc').value.trim();
+        const start = parseFloat(document.getElementById('ftStart').value);
+        const end = parseFloat(document.getElementById('ftEnd').value);
+        const diff = document.getElementById('ftDiff').value;
+        const type = document.getElementById('ftType').value;
+        const errEl = document.getElementById('ftError');
+
+        if (!desc) { errEl.textContent='请输入描述文字'; errEl.style.display=''; return; }
+        if (isNaN(start) || isNaN(end)) { errEl.textContent='请输入有效的时间范围'; errEl.style.display=''; return; }
+        if (end - start < 5) { errEl.textContent='时间间隔至少需要5秒'; errEl.style.display=''; return; }
+
+        try {
+            await aPost(`/admin/songs/${window._ftSongId}/free-tasks`, { description: desc, start_time: start, end_time: end, difficulty: diff, type: type });
+            showToast('自由任务已创建', 'success');
+            closeModal();
+            loadTaskSegments();
+        } catch(e) { errEl.textContent=e.message; errEl.style.display=''; }
+    });
+}
+
+async function deleteFreeTask(songId, freeTaskId) {
+    if (!confirm('确定删除该自由任务？')) return;
+    try {
+        await aDel(`/admin/songs/${songId}/free-tasks/${freeTaskId}`);
+        showToast('自由任务已删除', 'success');
+        loadTaskSegments();
+    } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function loadRecordingsForFreeTask(freeTaskId, songId) {
+    try {
+        const recRes = await aGet(`/admin/recordings?song_id=${songId}`);
+        const allRecs = recRes.data || [];
+        const recs = allRecs.filter(r => r.segment_id === freeTaskId && r.submitted);
+
+        const title = document.getElementById('recTableTitle');
+        if (title) title.textContent = `录音提交 — 自由任务`;
+        const hint = document.getElementById('recTableHint');
+        if (hint) hint.textContent = `${recs.length} 条录音 · 自由任务`;
+
+        const recBody = document.getElementById('recTableBody');
+        _destroyTaskWS();
+
+        recBody.innerHTML = recs.map((r, i) => {
+            const d = r.score_detail?.dimensions || {};
+            const composite = r.score_detail?.composite ?? '--';
+            return `<tr>
+            <td>${r.user_name}</td>
+            <td style="font-size:12px;color:var(--text-secondary);font-family:monospace;">${_fmtDateTime(r.created_at)}</td>
+            <td class="score-cell">${_fmtScore(d.pitch?.score ?? '--')}</td>
+            <td class="score-cell">${_fmtScore(d.volume?.score ?? '--')}</td>
+            <td class="score-cell">${_fmtScore(d.rhythm?.score ?? '--')}</td>
+            <td class="score-cell">${_fmtScore(d.tone?.score ?? '--')}</td>
+            <td class="score-cell score-composite">${_fmtScore(composite)}</td>
+            <td>${r.selected ? '<span class="badge badge-completed">已选定</span>' : '<span style="color:var(--text-light);">--</span>'}</td>
+            <td style="white-space:nowrap;">
+                <div style="display:inline-flex;align-items:center;gap:6px;">
+                    <div class="rec-wave-mini" id="taskRecWave${i}" style="height:28px;min-width:120px;border-radius:4px;overflow:hidden;"></div>
+                    <button class="btn btn-outline btn-sm" onclick="playTaskRec(${i},this)">▶</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteRecording('${r.id}')">删除</button>
+                </div>
+            </td>
+        </tr>`;
+        }).join('') || '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-light);">该自由任务暂无已提交录音</td></tr>';
+
+        _initTaskWaveSurfers(recs);
     } catch (e) { showToast(e.message, 'error'); }
 }
 
@@ -256,7 +447,7 @@ let _taskPlayingIdx = -1;
 function playTaskRec(idx, btn) {
     if (_taskPlayingIdx >= 0 && window._taskRecWS[_taskPlayingIdx]) {
         const prev = window._taskRecWS[_taskPlayingIdx];
-        if (prev.isPlaying()) prev.stop();
+        if (prev.isPlaying()) prev.pause();
         const prevBtn = document.querySelector(`#taskRecWave${_taskPlayingIdx}`)?.closest('td')?.querySelector('.btn-outline');
         if (prevBtn) prevBtn.textContent = '▶';
     }
@@ -265,7 +456,7 @@ function playTaskRec(idx, btn) {
     if (!ws) { showToast('波形未就绪'); return; }
 
     if (_taskPlayingIdx === idx && ws.isPlaying()) {
-        ws.stop();
+        ws.pause();
         btn.textContent = '▶';
         _taskPlayingIdx = -1;
         return;
@@ -311,6 +502,7 @@ async function deleteRecording(recId) {
 // ===== 合成导出模块 =====
 let _expSong = null;       // 当前选中歌曲完整数据
 let _expSegs = [];          // 唱段列表（含 recordings）
+let _expFreeTasks = [];     // 自由任务列表（含 recordings）
 let _expActiveSegIdx = -1;  // 当前选中唱段索引，-1 表示未选中
 let _expWS = null;          // 主波形 WaveSurfer
 let _expAudio = null;       // 伴奏 Audio 元素
@@ -396,13 +588,18 @@ async function _expPlayRecWithFx(idx) {
     // 停止之前的播放
     _expStopFxPlayback();
 
-    // 创建音效链：source → pitchShift(playbackRate) → dry/wet split → convolver → merge → destination
+    // 创建音效链：source → gainNode → dry/wet split → convolver → merge → destination
     const source = ctx.createBufferSource();
     source.buffer = buffer;
 
     // 音高：通过 detune 实现半音偏移（100 cents = 1 semitone），不改变速度
     const pitchShift = rec._pitchShift || 0;
     source.detune.value = pitchShift * 100; // cents
+
+    // 增益控制
+    const gainNode = ctx.createGain();
+    const gainDb = rec._gain || 0;
+    gainNode.gain.value = Math.pow(10, gainDb / 20); // dB → 线性
 
     // 混响效果
     const reverbPct = rec._reverb || 0;
@@ -420,13 +617,14 @@ async function _expPlayRecWithFx(idx) {
         convolver.buffer = _expGetReverbIR(ctx, reverbPct);
     }
 
-    // 连接：source → dryGain → merger → destination
-    //        source → convolver → wetGain → merger
-    source.connect(dryGain);
+    // 连接：source → gainNode → dryGain → merger → destination
+    //        source → gainNode → convolver → wetGain → merger
+    source.connect(gainNode);
+    gainNode.connect(dryGain);
     dryGain.connect(merger);
 
     if (reverbPct > 0) {
-        source.connect(convolver);
+        gainNode.connect(convolver);
         convolver.connect(wetGain);
         wetGain.connect(merger);
     }
@@ -436,7 +634,7 @@ async function _expPlayRecWithFx(idx) {
     source.start(0);
 
     _expFxPlaying = {
-        source, idx, dryGain, wetGain, convolver, merger,
+        source, idx, dryGain, wetGain, convolver, merger, gainNode,
         startTime: ctx.currentTime,
         duration: buffer.duration
     };
@@ -478,6 +676,7 @@ function _expStopFxPlayback() {
     if (_expFxPlaying) {
         try { _expFxPlaying.source.stop(); } catch(e){}
         try { _expFxPlaying.source.disconnect(); } catch(e){}
+        try { _expFxPlaying.gainNode.disconnect(); } catch(e){}
         try { _expFxPlaying.dryGain.disconnect(); } catch(e){}
         try { _expFxPlaying.wetGain.disconnect(); } catch(e){}
         try { _expFxPlaying.convolver.disconnect(); } catch(e){}
@@ -495,6 +694,10 @@ function _expUpdateFxParams(idx, rec) {
     const pitchShift = rec._pitchShift || 0;
     try { _expFxPlaying.source.detune.value = pitchShift * 100; } catch(e){}
 
+    // 更新增益
+    const gainDb = rec._gain || 0;
+    try { _expFxPlaying.gainNode.gain.setValueAtTime(Math.pow(10, gainDb / 20), ctx.currentTime); } catch(e){}
+
     // 更新混响干湿比
     const reverbPct = rec._reverb || 0;
     const wetRatio = reverbPct / 100;
@@ -505,7 +708,7 @@ function _expUpdateFxParams(idx, rec) {
     if (reverbPct > 0 && _expFxPlaying.convolver.buffer === null) {
         _expFxPlaying.convolver.buffer = _expGetReverbIR(ctx, reverbPct);
         try {
-            _expFxPlaying.source.connect(_expFxPlaying.convolver);
+            _expFxPlaying.gainNode.connect(_expFxPlaying.convolver);
             _expFxPlaying.convolver.connect(_expFxPlaying.wetGain);
             _expFxPlaying.wetGain.connect(_expFxPlaying.merger);
         } catch(e){}
@@ -560,11 +763,17 @@ async function _expLoadSong() {
         const res = await aGet(`/admin/songs/${songId}`);
         _expSong = res.data;
         _expSegs = _expSong.segments || [];
+        // 自由任务列表
+        _expFreeTasks = (_expSong.free_tasks || []).map(ft => ({ ...ft, songId }));
         // 加载该歌曲所有录音
         const recRes = await aGet(`/admin/recordings?song_id=${songId}`);
         const allRecs = recRes.data || [];
         _expSegs.forEach(seg => {
             seg._recs = allRecs.filter(r => r.segment_id === seg.id && r.submitted);
+        });
+        // 自由任务录音
+        _expFreeTasks.forEach(ft => {
+            ft._recs = allRecs.filter(r => r.segment_id === ft.id && r.submitted);
         });
         // 显示上传伴奏按钮
         if (accBtn) accBtn.style.display = '';
@@ -597,7 +806,7 @@ function _expCleanup() {
     _expRecAudios.forEach(a => { try { a.pause(); a.src = ''; } catch(e){} });
     _expRecAudios = [];
     if (_expRAF) { cancelAnimationFrame(_expRAF); _expRAF = 0; }
-    _expSong = null; _expSegs = []; _expActiveSegIdx = -1;
+    _expSong = null; _expSegs = []; _expFreeTasks = []; _expActiveSegIdx = -1;
     _expIsPlaying = false; _expPlayingRecIdx = -1;
     _expAccUrl = null;
     _expFxBuffers = [];
@@ -728,9 +937,14 @@ function _expRenderWavePanel() {
                 <div class="export-overlay" id="expOverlay"></div>
                 <div class="export-cursor-line" id="expCursorLine" style="display:none;"></div>
             </div>
+            <div class="export-free-track" id="expFreeTrack">
+                <span class="export-free-track-label">Free Track</span>
+                <div id="expFreeTrackItems"></div>
+            </div>
             <div class="export-timeline" id="expTimeline"></div>
         </div>
     </div>`;
+    _expRenderFreeTrack();
     const scrollEl = document.getElementById('expWaveScroll');
     // 点击空白取消选中 + 点击波形定位播放进度
     scrollEl.addEventListener('click', e => {
@@ -806,6 +1020,7 @@ function _expInitWS() {
         _expWS.setMuted?.(true);
         _expApplyZoom();
         _expRenderOverlay();
+        _expRenderFreeTrack();
         _expRenderTimeline();
     });
     _expWS.on('error', () => { _expRenderOverlay(); });
@@ -829,8 +1044,11 @@ function _expApplyZoom() {
     try { _expWS.zoom(pxPerSec); } catch(e){}
     const host = document.getElementById('expWaveHost');
     if (host) host.style.width = `${Math.ceil(neededW)}px`;
+    const freeTrack = document.getElementById('expFreeTrack');
+    if (freeTrack) freeTrack.style.width = `${Math.ceil(neededW)}px`;
     const timeline = document.getElementById('expTimeline');
     if (timeline) timeline.style.width = `${Math.ceil(neededW)}px`;
+    _expRenderFreeTrack();
 }
 
 function _expRenderTimeline() {
@@ -856,6 +1074,36 @@ function _expRenderTimeline() {
         html += `<div class="tick" style="left:${left}px;"><span class="tick-label">${label}</span></div>`;
     }
     tl.innerHTML = html;
+}
+
+// ---- 自由轨道区 ----
+function _expRenderFreeTrack() {
+    const container = document.getElementById('expFreeTrackItems');
+    if (!container) return;
+    const freeTrack = document.getElementById('expFreeTrack');
+    if (!_expFreeTasks || _expFreeTasks.length === 0) {
+        container.innerHTML = '';
+        if (freeTrack) freeTrack.style.display = 'none';
+        return;
+    }
+    if (freeTrack) freeTrack.style.display = '';
+    const dur = (_expWS?.getDuration?.()) || _expSong?.duration || 0;
+    const hostEl = document.getElementById('expWaveHost');
+    const widthPx = hostEl?.scrollWidth || hostEl?.clientWidth || 0;
+    if (!dur || !widthPx) { container.innerHTML = ''; return; }
+
+    container.innerHTML = _expFreeTasks.map((ft, fi) => {
+        // 找已选定的录音
+        const selectedRecs = (ft._recs || []).filter(r => r.selected);
+        const left = (ft.start_time / dur) * widthPx;
+        const w = Math.max(((ft.end_time - ft.start_time) / dur) * widthPx, 40);
+        const names = selectedRecs.map(r => r.user_name).join(', ') || (selectedRecs.length > 0 ? `${selectedRecs.length}人` : '未放置');
+        return `<div class="export-free-track-item" data-ft-idx="${fi}" style="left:${left}px;width:${w}px;"
+            title="${ft.description || ''} (${fmtTimePrecise(ft.start_time)}-${fmtTimePrecise(ft.end_time)})">
+            <span class="free-track-name">${names}</span>
+            <span class="free-track-time">${fmtTimePrecise(ft.start_time)}</span>
+        </div>`;
+    }).join('');
 }
 
 function _expRenderOverlay() {
@@ -990,14 +1238,16 @@ function _expRenderRecDetail() {
         if (isChorus && !r.selected && selectedCount >= 20) disabled = 'disabled';
         const pitchShift = r._pitchShift || 0;
         const reverb = r._reverb || 0;
+        const gain = r._gain || 0;
         return `<div class="rec-card-lg ${r.selected?'selected':''}" data-rec-idx="${i}">
             <div class="rec-top">
                 <input type="checkbox" class="rec-check" data-rec-id="${r.id}" ${checked} ${disabled}
                        title="${disabled?'已达选择上限':''}">
                 <div class="rec-info">
-                    <div class="rec-user">${r.user_name}</div>
+                    <div class="rec-user">${r.user_name} <span class="rec-score">${score !== '--' ? score+'分' : '--'}</span></div>
                     <div class="rec-time">${_fmtDateTime(r.created_at)}</div>
                 </div>
+                <button class="rec-trim-btn" data-idx="${i}" title="裁剪">✂</button>
             </div>
             <div class="rec-wave-wrap" id="expRecW${i}"></div>
             <div class="rec-bottom">
@@ -1008,12 +1258,16 @@ function _expRenderRecDetail() {
                     <span class="rec-pitch-val" id="expPitch${i}">${pitchShift > 0 ? '+' + pitchShift : pitchShift}</span>
                     <button class="rec-pitch-btn" data-idx="${i}" data-dir="1" title="升调">+</button>
                 </div>
+                <div class="rec-ctrl-group rec-ctrl-gain">
+                    <span class="rec-ctrl-label">增益</span>
+                    <input type="range" class="rec-gain-slider" data-idx="${i}" min="-20" max="20" value="${gain}">
+                    <span class="rec-gain-val" id="expGain${i}">${gain > 0 ? '+' + gain : gain}dB</span>
+                </div>
                 <div class="rec-ctrl-group rec-ctrl-reverb">
                     <span class="rec-ctrl-label">混响</span>
                     <input type="range" class="rec-reverb-slider" data-idx="${i}" min="0" max="100" value="${reverb}">
                     <span class="rec-reverb-val" id="expReverb${i}">${reverb}%</span>
                 </div>
-                <div class="rec-score">${score !== '--' ? score+'分' : '--'}</div>
             </div>
         </div>`;
     }).join('');
@@ -1060,6 +1314,19 @@ function _expRenderRecDetail() {
         });
     });
 
+    // 绑定增益滑块
+    body.querySelectorAll('.rec-gain-slider').forEach(slider => {
+        slider.addEventListener('input', () => {
+            const idx = parseInt(slider.dataset.idx);
+            const rec = recs[idx];
+            if (!rec) return;
+            rec._gain = parseInt(slider.value);
+            const el = document.getElementById(`expGain${idx}`);
+            if (el) el.textContent = (rec._gain > 0 ? '+' + rec._gain : rec._gain) + 'dB';
+            _expUpdateFxParams(idx, rec);
+        });
+    });
+
     // 绑定混响滑块
     body.querySelectorAll('.rec-reverb-slider').forEach(slider => {
         slider.addEventListener('input', () => {
@@ -1069,13 +1336,169 @@ function _expRenderRecDetail() {
             rec._reverb = parseInt(slider.value);
             const el = document.getElementById(`expReverb${idx}`);
             if (el) el.textContent = rec._reverb + '%';
-            // 实时更新音效
             _expUpdateFxParams(idx, rec);
+        });
+    });
+
+    // 绑定裁剪按钮
+    body.querySelectorAll('.rec-trim-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const idx = parseInt(btn.dataset.idx);
+            _expToggleTrim(idx, btn);
         });
     });
 
     // 初始化波形
     _expInitRecWS(recs);
+}
+
+// ========== 裁剪功能 ==========
+let _expTrimActive = {}; // { idx: { overlay, leftHandle, rightHandle, trimStart, trimEnd, duration } }
+
+function _expToggleTrim(idx, btn) {
+    if (_expTrimActive[idx]) {
+        // 已激活 → 确认裁剪并关闭
+        _expConfirmTrim(idx, btn);
+        return;
+    }
+    // 激活裁剪模式
+    const waveWrap = document.getElementById(`expRecW${idx}`);
+    if (!waveWrap) return;
+    const ws = _expRecWS[idx];
+    if (!ws) return;
+
+    const seg = _expSegs[_expActiveSegIdx];
+    const rec = (seg?._recs || [])[idx];
+    if (!rec) return;
+
+    const duration = ws.getDuration() || 1;
+    const trimStart = rec._trimStart || 0;
+    const trimEnd = rec._trimEnd || 0;
+
+    btn.classList.add('active');
+
+    // 创建裁剪覆盖层
+    const overlay = document.createElement('div');
+    overlay.className = 'rec-trim-overlay';
+    overlay.innerHTML = `
+        <div class="trim-region trim-left" style="width:${(trimStart / duration) * 100}%">
+            <div class="trim-handle trim-handle-left" data-side="left"></div>
+        </div>
+        <div class="trim-region trim-right" style="width:${(trimEnd / duration) * 100}%">
+            <div class="trim-handle trim-handle-right" data-side="right"></div>
+        </div>
+    `;
+    waveWrap.style.position = 'relative';
+    waveWrap.appendChild(overlay);
+
+    const leftRegion = overlay.querySelector('.trim-left');
+    const rightRegion = overlay.querySelector('.trim-right');
+
+    _expTrimActive[idx] = {
+        overlay, leftRegion, rightRegion,
+        trimStart, trimEnd, duration
+    };
+
+    // 拖拽处理
+    const onPointerDown = (e) => {
+        const handle = e.target.closest('.trim-handle');
+        if (!handle) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const side = handle.dataset.side;
+        const rect = waveWrap.getBoundingClientRect();
+        const totalW = rect.width;
+
+        const onMove = (ev) => {
+            const x = (ev.clientX || ev.touches?.[0]?.clientX || 0) - rect.left;
+            const pct = Math.max(0, Math.min(1, x / totalW));
+            const state = _expTrimActive[idx];
+            if (!state) return;
+            if (side === 'left') {
+                const maxPct = 1 - (state.trimEnd / state.duration);
+                const clampedPct = Math.min(pct, maxPct - 0.02);
+                state.trimStart = Math.max(0, clampedPct * state.duration);
+                leftRegion.style.width = (clampedPct * 100) + '%';
+            } else {
+                const minPct = state.trimStart / state.duration;
+                const clampedPct = Math.max(1 - pct, 0);
+                const effectivePct = Math.min(clampedPct, 1 - minPct - 0.02);
+                state.trimEnd = Math.max(0, effectivePct * state.duration);
+                rightRegion.style.width = (effectivePct * 100) + '%';
+            }
+        };
+
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('touchend', onUp);
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('touchend', onUp);
+    };
+
+    overlay.addEventListener('mousedown', onPointerDown);
+    overlay.addEventListener('touchstart', onPointerDown, { passive: false });
+}
+
+async function _expConfirmTrim(idx, btn) {
+    const state = _expTrimActive[idx];
+    if (!state) return;
+
+    const seg = _expSegs[_expActiveSegIdx];
+    const rec = (seg?._recs || [])[idx];
+    if (!rec) return;
+
+    const trimStart = Math.round(state.trimStart * 1000) / 1000;
+    const trimEnd = Math.round(state.trimEnd * 1000) / 1000;
+
+    // 保存裁剪参数到录音对象
+    rec._trimStart = trimStart;
+    rec._trimEnd = trimEnd;
+
+    // 如果有实际裁剪量，调用后端 API 执行裁剪
+    if (trimStart > 0.01 || trimEnd > 0.01) {
+        try {
+            btn.disabled = true;
+            btn.textContent = '⏳';
+            await aPost(`/admin/recordings/${rec.id}/trim`, {
+                trim_start: trimStart,
+                trim_end: trimEnd
+            });
+            showToast('裁剪成功', 'success');
+            // 清除音频缓存以重新加载
+            _expFxBuffers[idx] = null;
+            // 清理裁剪状态
+            _expCleanupTrim(idx, btn);
+            // 刷新录音数据和波形
+            await _expRefreshSegRecs();
+            return;
+        } catch (e) {
+            showToast('裁剪失败: ' + e.message, 'error');
+            btn.disabled = false;
+            btn.textContent = '✂';
+        }
+    }
+
+    // 无实际裁剪，直接关闭
+    _expCleanupTrim(idx, btn);
+}
+
+function _expCleanupTrim(idx, btn) {
+    const state = _expTrimActive[idx];
+    if (state && state.overlay && state.overlay.parentNode) {
+        state.overlay.parentNode.removeChild(state.overlay);
+    }
+    delete _expTrimActive[idx];
+    if (btn) {
+        btn.classList.remove('active');
+        btn.disabled = false;
+        btn.textContent = '✂';
+    }
 }
 
 function _expInitRecWS(recs) {
@@ -1195,6 +1618,9 @@ async function _expStartSynth() {
                 recParams[r.id] = {
                     pitchShift: r._pitchShift || 0,
                     reverb: r._reverb || 0,
+                    gain: r._gain || 0,
+                    trimStart: r._trimStart || 0,
+                    trimEnd: r._trimEnd || 0,
                 };
             }
         });

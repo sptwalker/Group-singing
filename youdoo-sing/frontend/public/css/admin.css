@@ -543,6 +543,26 @@ tbody tr:last-child td { border-bottom: none; }
 .editor-toolbar .undo-redo { display: flex; gap: 4px; }
 .toolbar-spacer { flex: 1; }
 
+/* 编辑器锁定覆盖层 */
+.editor-lock-overlay {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.12);
+    z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: all;
+    border-radius: 8px;
+}
+.editor-lock-overlay .lock-badge {
+    background: rgba(255,255,255,0.95);
+    padding: 10px 24px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #6366f1;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    user-select: none;
+}
+
 /* 主面板：左侧唱段列表 + 右侧波形 */
 .editor-main {
     display: flex;
@@ -1297,12 +1317,22 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* ===== 任务管理 - 唱段行选择 ===== */
+.task-seg-scroll { max-height:280px; overflow-y:auto; }
 .task-seg-row { cursor: pointer; transition: background 0.15s; }
 .task-seg-row:hover { background: #f0f4ff !important; }
 .task-seg-row.task-seg-active {
     background: var(--primary-bg) !important;
     box-shadow: inset 3px 0 0 var(--primary);
 }
+.task-seg-free { background:#fffbeb; }
+.task-seg-free:hover { background:#fef3c7 !important; }
+
+/* 统计面板 */
+.task-stats-panel { font-size:13px; }
+.task-stats-panel .badge { padding:2px 8px;font-size:11px; }
+
+/* 自由任务标签 */
+.badge-free { background:#f0fdf4;color:#16a34a; }
 
 /* 评分单元格 */
 .score-cell { text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -1336,6 +1366,14 @@ tbody tr:last-child td { border-bottom: none; }
 .export-timeline { position:relative; height:22px; background:rgba(255,255,255,.06); border-top:1px solid rgba(255,255,255,.1); user-select:none; }
 .export-timeline .tick { position:absolute; top:0; height:100%; border-left:1px solid rgba(255,255,255,.15); }
 .export-timeline .tick-label { position:absolute; top:3px; left:3px; font-size:9px; color:rgba(255,255,255,.5); font-family:monospace; white-space:nowrap; }
+
+/* 自由轨道区（波形下方、时间轨道上方） */
+.export-free-track { position:relative; height:60px; background:rgba(16,185,129,.08); border-top:1px solid rgba(16,185,129,.2); overflow:hidden; }
+.export-free-track-label { position:absolute;top:2px;left:6px;font-size:9px;color:#10b981;font-weight:600;z-index:3;pointer-events:none;text-transform:uppercase;letter-spacing:.5px; }
+.export-free-track-item { position:absolute; top:22px; bottom:4px; min-width:50px; background:linear-gradient(135deg,#10b981,#059669); border-radius:6px; cursor:pointer; pointer-events:all; display:flex;align-items:center;padding:0 8px;gap:2px; box-shadow:0 2px 4px rgba(0,0,0,.25); transition:box-shadow .15s,zoom .15s; z-index:2; user-select:none; }
+.export-free-track-item:hover { box-shadow:0 3px 8px rgba(16,185,129,.5); }
+.export-free-track-item .free-track-name { font-size:10px;color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 1px rgba(0,0,0,.4); }
+.export-free-track-item .free-track-time { font-size:8px;color:rgba(255,255,255,.7);font-family:monospace; }
 .export-seg-block { position:absolute; top:0; bottom:0; border-radius:4px; opacity:0.45; cursor:pointer; pointer-events:all; transition:opacity .15s; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; padding-top:4px; gap:2px; overflow:hidden; }
 .export-seg-block:hover { opacity:0.65; }
 .export-seg-block.active { opacity:0.75; box-shadow:0 0 0 2px #fff inset; }
@@ -1355,7 +1393,7 @@ tbody tr:last-child td { border-bottom: none; }
 .export-rec-panel { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; }
 .export-rec-header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); }
 .export-rec-header h4 { margin:0; font-size:14px; font-weight:600; }
-.export-rec-body { padding:12px 16px; display:grid; grid-template-columns:repeat(4,1fr); gap:10px; max-height:400px; overflow-y:auto; }
+.export-rec-body { padding:12px 16px; display:grid; grid-template-columns:repeat(3,1fr); gap:10px; max-height:400px; overflow-y:auto; }
 .export-rec-empty { text-align:center; padding:40px 16px; color:var(--text-light); font-size:13px; }
 
 /* 大录音卡片 */
@@ -1363,18 +1401,39 @@ tbody tr:last-child td { border-bottom: none; }
 .rec-card-lg:hover { border-color:var(--primary-light); }
 .rec-card-lg.selected { border-color:var(--primary); box-shadow:0 0 0 2px rgba(79,70,229,.15); background:#f5f3ff; }
 .rec-card-lg .rec-check { width:16px; height:16px; accent-color:var(--primary); cursor:pointer; flex-shrink:0; }
-.rec-card-lg .rec-top { display:flex; align-items:center; gap:6px; }
+.rec-card-lg .rec-top { display:flex; align-items:center; gap:6px; position:relative; }
 .rec-card-lg .rec-info { flex:1; min-width:0; }
-.rec-card-lg .rec-info .rec-user { font-weight:600; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rec-card-lg .rec-info .rec-user { font-weight:600; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:6px; }
+.rec-card-lg .rec-info .rec-user .rec-score { font-weight:400; font-size:10px; color:var(--primary); flex-shrink:0; }
 .rec-card-lg .rec-info .rec-time { font-size:10px; color:var(--text-light); font-family:monospace; }
-.rec-card-lg .rec-wave-wrap { width:100%; height:26px; border-radius:4px; overflow:hidden; }
-.rec-card-lg .rec-bottom { display:flex; align-items:center; gap:12px; }
+.rec-card-lg .rec-wave-wrap { width:100%; height:26px; border-radius:4px; overflow:visible; position:relative; }
+.rec-card-lg .rec-bottom { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .rec-card-lg .rec-play-btn { width:24px; height:24px; border-radius:50%; border:none; background:var(--primary); color:#fff; font-size:10px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background .15s; }
 .rec-card-lg .rec-play-btn:hover { background:#4338ca; }
-.rec-card-lg .rec-score { font-size:10px; color:var(--text-secondary); flex-shrink:0; margin-left:auto; }
-.rec-card-lg .rec-ctrl-group { display:flex; align-items:center; gap:4px; flex-shrink:0; }
+.rec-card-lg .rec-ctrl-group { display:flex; align-items:center; gap:3px; flex-shrink:0; }
 .rec-card-lg .rec-ctrl-group.rec-ctrl-reverb { flex:1; min-width:0; }
-.rec-card-lg .rec-ctrl-group.rec-ctrl-reverb .rec-reverb-slider { flex:1; min-width:60px; }
+.rec-card-lg .rec-ctrl-group.rec-ctrl-reverb .rec-reverb-slider { flex:1; min-width:50px; }
+.rec-card-lg .rec-ctrl-group.rec-ctrl-gain { flex:1; min-width:0; }
+.rec-card-lg .rec-ctrl-group.rec-ctrl-gain .rec-gain-slider { flex:1; min-width:40px; }
+.rec-gain-slider { height:4px; accent-color:#f59e0b; min-width:0; cursor:pointer; }
+.rec-gain-val { font-size:9px; color:var(--text-secondary); font-family:monospace; min-width:30px; text-align:right; }
+
+/* 裁剪按钮 */
+.rec-trim-btn { width:22px; height:22px; border-radius:4px; border:1.5px solid var(--border); background:var(--bg-main); color:var(--text-secondary); font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all .15s; padding:0; line-height:1; }
+.rec-trim-btn:hover { border-color:#f59e0b; color:#f59e0b; background:#fffbeb; }
+.rec-trim-btn.active { border-color:#f59e0b; color:#fff; background:#f59e0b; }
+
+/* 裁剪覆盖层 */
+.rec-trim-overlay { position:absolute; top:0; left:0; right:0; bottom:0; z-index:5; pointer-events:none; }
+.trim-region { position:absolute; top:0; bottom:0; background:rgba(0,0,0,0.45); pointer-events:all; }
+.trim-region.trim-left { left:0; }
+.trim-region.trim-right { right:0; }
+.trim-handle { position:absolute; top:0; bottom:0; width:8px; cursor:ew-resize; z-index:6; }
+.trim-handle::after { content:''; position:absolute; top:50%; transform:translateY(-50%); width:4px; height:16px; border-radius:2px; background:#f59e0b; box-shadow:0 0 4px rgba(245,158,11,0.5); }
+.trim-handle-left { right:-4px; }
+.trim-handle-left::after { right:0; }
+.trim-handle-right { left:-4px; }
+.trim-handle-right::after { left:0; }
 .rec-ctrl-label { font-size:10px; color:var(--text-secondary); white-space:nowrap; flex-shrink:0; }
 .rec-pitch-btn { width:18px; height:18px; border-radius:3px; border:1.5px solid var(--border); background:var(--card); color:var(--text); font-size:11px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .15s; line-height:1; padding:0; }
 .rec-pitch-btn:hover { border-color:var(--primary); color:var(--primary); background:var(--primary-bg); }

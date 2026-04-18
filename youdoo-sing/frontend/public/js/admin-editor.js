@@ -2,6 +2,7 @@
 let editorWS = null, editorSong = null, editorSegments = [], editorActiveIdx = -1;
 let editorAudio = null, _editorAudioRAF = 0;
 let editorDirty = false, editorHistory = [], editorHistoryIdx = -1;
+let _editorLocked = false;
 const HIST_MAX = 20, SEG_MIN_DUR = 0.5;
 let _loopPlay = false, _playingSegOnly = false;
 let _editorEventsBound = false, _editorPlayingIdx = -1;
@@ -51,6 +52,7 @@ async function renderEditor(container) {
             <div class="toolbar-spacer"></div>
             <button class="btn btn-outline btn-sm" id="btnReset" disabled title="重置为AI自动切分方案">🔄 重置</button>
             <button class="btn btn-success btn-sm" id="btnSaveAll" disabled>💾 保存</button>
+            <button class="btn btn-primary btn-sm" id="btnPublishTask" disabled style="margin-left:6px;">📢 发布任务</button>
         </div>
         <div class="editor-main" id="edMain">
             <div class="seg-list-panel" id="segListPanel">
@@ -889,6 +891,7 @@ function _bindEditorEvents() {
     $('btnRedo').onclick = edRedo;
     $('btnReset').onclick = _resetSegments;
     $('btnSaveAll').onclick = _saveAll;
+    $('btnPublishTask').onclick = _togglePublishTask;
 
     // seg detail panel buttons
     $('segDetailStart').dataset.field = 'start_time';
@@ -1007,6 +1010,7 @@ function _edKeydown(e) {
     const tag = (e.target.tagName||'').toLowerCase();
     if(tag==='input'||tag==='textarea'||tag==='select') return;
     if(e.key===' ') { e.preventDefault(); document.getElementById('btnPlayPause')?.click(); }
+    if(_editorLocked) return;
     if(e.key==='Delete'&&editorActiveIdx>=0) { e.preventDefault(); _deleteSegment(editorActiveIdx); }
     if(e.key==='ArrowLeft') { e.preventDefault(); _nudgeSegTime(-0.1); }
     if(e.key==='ArrowRight') { e.preventDefault(); _nudgeSegTime(0.1); }
@@ -1046,9 +1050,12 @@ async function _loadSong(songId) {
         document.getElementById('edUnsaved').style.display = 'none';
         const _en = id => { const el = document.getElementById(id); if(el) el.disabled = false; };
         _en('btnSaveAll'); _en('btnReset'); _en('btnPlay'); _en('btnPlayPause'); _en('btnLoop');
+        _en('btnPublishTask');
         _syncToolbarSegButtons();
         _initWS();
         _renderSegList();
+        // 检查任务发布状态并锁定/解锁编辑器
+        _applyPublishLock();
     } catch(e) { showToast(e.message,'error'); }
 }
 

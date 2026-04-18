@@ -119,6 +119,7 @@ function _commitChange() {
 // ===== 拖拽手柄 =====
 let _dragInfo = null;
 function _startDrag(e) {
+    if (_editorLocked) return;
     e.preventDefault(); e.stopPropagation();
     const idx = +e.target.dataset.idx, side = e.target.dataset.side;
     if(!editorWS) return;
@@ -371,6 +372,7 @@ function _saveSegModal(idx) {
 
 // ===== 右键菜单 =====
 function _showCtx(e, idx) {
+    if (_editorLocked) { e.preventDefault(); return; }
     e.preventDefault(); e.stopPropagation();
     _selectSeg(idx, false);
     const cm = document.getElementById('ctxMenu');
@@ -393,6 +395,7 @@ function _hideCtx() {
 
 // ===== 波形空白区域右键菜单 =====
 function _onOverlayContextMenu(e) {
+    if (_editorLocked) { e.preventDefault(); return; }
     // 如果点击在seg-block上，不处理（由seg-block自己的contextmenu处理）
     if(e.target.closest('.seg-block')) return;
     e.preventDefault();
@@ -505,7 +508,7 @@ function _mergeWithNext(idx) {
 
 // ===== 保存全部 =====
 async function _saveAll() {
-    if(!editorSong) return;
+    if(!editorSong || _editorLocked) return;
     // 验证
     for(let i=0; i<editorSegments.length; i++) {
         const s = editorSegments[i];
@@ -562,7 +565,7 @@ async function _onSaveSuccess(res) {
 
 // ===== 重置为服务器原始方案 =====
 function _resetSegments() {
-    if(!editorSong) return;
+    if(!editorSong || _editorLocked) return;
     showModal('重置唱段', '<p>是否重置为AI自动切分方案？当前所有未保存的修改将丢失。</p>',
         `<button class="btn btn-outline" onclick="closeModal()">取消</button>
          <button class="btn btn-danger" onclick="_confirmReset()">确认重置</button>`);
@@ -596,4 +599,129 @@ function openEditorForSong(songId) {
         const sel = document.getElementById('edSongSel');
         if(sel) { sel.value = songId; _loadSong(songId); }
     }, 500);
+}
+
+// ===== 发布/取消任务 =====
+
+function _togglePublishTask() {
+    if (!editorSong) return;
+    if (editorSong.task_published) {
+        _unpublishTask();
+    } else {
+        _publishTask();
+    }
+}
+
+function _publishTask() {
+    if (!editorSong) return;
+    if (editorDirty) {
+        showToast('请先保存当前修改', 'warning');
+        return;
+    }
+    if (!editorSegments.length) {
+        showToast('歌曲没有唱段数据，请先完成分段编辑', 'warning');
+        return;
+    }
+    showModal('发布任务',
+        `<p style="color:#dc2626;font-weight:600;">一旦发布歌曲任务，歌曲分段编辑数据将不能再进行修改，否则将丢失所有的用户录音片段！</p>
+         <p style="margin-top:8px;">确定要发布「${editorSong.title}」的拼歌任务吗？</p>`,
+        `<button class="btn btn-outline" onclick="closeModal()">取消</button>
+         <button class="btn btn-primary" onclick="_confirmPublishTask()">确认发布</button>`);
+}
+
+async function _confirmPublishTask() {
+    closeModal();
+    if (!editorSong) return;
+    try {
+        await aPost(`/admin/songs/${editorSong.id}/publish-task`, {});
+        editorSong.task_published = true;
+        showToast('任务已发布', 'success');
+        _applyPublishLock();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function _unpublishTask() {
+    if (!editorSong) return;
+    showModal('取消任务',
+        `<p style="color:#dc2626;font-weight:600;">一旦取消任务将删除当前任务的所有用户录音片段，并恢复歌曲唱段切分的可编辑状态。</p>
+         <p style="margin-top:8px;">确定要取消「${editorSong.title}」的拼歌任务吗？</p>`,
+        `<button class="btn btn-outline" onclick="closeModal()">取消</button>
+         <button class="btn btn-danger" onclick="_confirmUnpublishTask()">确认取消任务</button>`);
+}
+
+async function _confirmUnpublishTask() {
+    closeModal();
+    if (!editorSong) return;
+    try {
+        const res = await aPost(`/admin/songs/${editorSong.id}/unpublish-task`, {});
+        editorSong.task_published = false;
+        showToast(`任务已取消，已删除 ${res.deleted_recordings || 0} 条录音`, 'success');
+        // 刷新歌曲数据
+        const songRes = await aGet(`/admin/songs/${editorSong.id}`);
+        editorSong = songRes.data;
+        editorSegments = JSON.parse(JSON.stringify(editorSong.segments || []));
+        _editorSegListVersion = '';
+        editorHistory = []; editorHistoryIdx = -1; _pushHistory();
+        _renderSegList(); _renderOverlay();
+        _applyPublishLock();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function _applyPublishLock() {
+    const isPublished = !!(editorSong && editorSong.task_published);
+    _editorLocked = isPublished;
+
+    const btnPublish = document.getElementById('btnPublishTask');
+    if (btnPublish) {
+        if (isPublished) {
+            btnPublish.textContent = '🚫 取消任务';
+            btnPublish.className = 'btn btn-danger btn-sm';
+            btnPublish.style.marginLeft = '6px';
+        } else {
+            btnPublish.textContent = '📢 发布任务';
+            btnPublish.className = 'btn btn-primary btn-sm';
+            btnPublish.style.marginLeft = '6px';
+        }
+    }
+
+    // 锁定/解锁编辑控件
+    const lockIds = [
+        'btnSaveAll', 'btnReset',
+        'btnUndo', 'btnRedo',
+        'segDetailStart', 'segDetailEnd',
+        'sdBtnAdjust', 'sdBtnSplit', 'sdBtnMerge', 'sdBtnDelete'
+    ];
+    lockIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = isPublished;
+    });
+
+    // 波形锁定覆盖层
+    const waveArea = document.getElementById('waveArea');
+    if (waveArea) {
+        let lockOverlay = document.getElementById('editorLockOverlay');
+        if (isPublished) {
+            if (!lockOverlay) {
+                lockOverlay = document.createElement('div');
+                lockOverlay.id = 'editorLockOverlay';
+                lockOverlay.className = 'editor-lock-overlay';
+                lockOverlay.innerHTML = '<div class="lock-badge">🔒 任务已发布 · 编辑已锁定</div>';
+                waveArea.parentElement.style.position = 'relative';
+                waveArea.parentElement.appendChild(lockOverlay);
+            }
+            lockOverlay.style.display = '';
+        } else {
+            if (lockOverlay) lockOverlay.style.display = 'none';
+        }
+    }
+
+    // 禁止拖拽操作
+    const overlayHost = document.getElementById('segOverlay');
+    if (overlayHost) {
+        overlayHost.style.pointerEvents = isPublished ? 'none' : '';
+    }
 }
