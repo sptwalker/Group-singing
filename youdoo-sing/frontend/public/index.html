@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>大家一起来拼歌</title>
     <link rel="stylesheet" href="css/common.css">
-    <link rel="stylesheet" href="css/login.css">
+    <link rel="stylesheet" href="css/login.css?v=20260418a">
 </head>
 <body>
     <div id="app" class="page login-page">
         <div class="login-header">
-            <div class="logo-icon">🎤</div>
+            <div class="logo-icon">&#127908;</div>
             <h1 class="app-title">大家一起来拼歌</h1>
             <p class="app-subtitle">和朋友们一起完成一首歌</p>
         </div>
@@ -25,31 +25,15 @@
         </div>
 
         <div class="login-bottom">
-            <button class="btn-wechat" id="btnLogin">
-                <span class="wechat-icon">💬</span>
+            <button class="btn-wechat" id="btnLogin" type="button">
+                <span class="wechat-icon">&#128172;</span>
                 微信登录
             </button>
-            <p class="login-tip">登录后即可参与��歌</p>
-        </div>
-
-        <!-- 昵称弹窗 -->
-        <div class="modal-overlay" id="nicknameModal" style="display:none;">
-            <div class="modal-box">
-                <h3>设置你的昵称</h3>
-                <p class="modal-desc">其他拼歌伙伴会看到这个名字</p>
-                <div class="modal-options">
-                    <button class="btn-option active" id="btnUseWx" data-type="wx">使用微信名</button>
-                    <button class="btn-option" id="btnCustom" data-type="custom">自定义名称</button>
-                </div>
-                <div class="custom-input-wrap" id="customInputWrap" style="display:none;">
-                    <input type="text" id="customName" class="input-name" placeholder="输入你的昵称" maxlength="12">
-                </div>
-                <button class="btn-confirm" id="btnConfirm">确认进入</button>
-            </div>
+            <p class="login-tip">登录后即可参与拼歌</p>
         </div>
     </div>
 
-    <script src="js/config.js?v=20260417e"></script>
-    <script src="js/login.js"></script>
+    <script src="js/config.js?v=20260418a"></script>
+    <script src="js/login.js?v=20260418a"></script>
 </body>
 </html>

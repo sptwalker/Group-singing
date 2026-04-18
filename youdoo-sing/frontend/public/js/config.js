@@ -1,5 +1,6 @@
 // ===== 全局配置 =====
-const API_BASE = 'http://sing.youdoogo.com:8000/api';
+const API_BASE = (window.YOUDOO_API_BASE || '/api').replace(/\/$/, '');
+let _loginRedirectTimer = 0;
 
 // ===== 全局音频管理器（强制互斥） =====
 const AudioManager = {
@@ -190,6 +191,14 @@ function showToast(msg, duration = 2000) {
     t.classList.add('show');
     clearTimeout(t._timer);
     t._timer = setTimeout(() => t.classList.remove('show'), duration);
+
+    if (!getUser() && /Please sign in/i.test(String(msg || '')) && !_loginRedirectTimer) {
+        const target = getCurrentPageTarget('task.html');
+        _loginRedirectTimer = setTimeout(() => {
+            _loginRedirectTimer = 0;
+            startLoginFlow(target);
+        }, 250);
+    }
 }
 
 function formatTime(sec) {
@@ -202,6 +211,117 @@ function getUser() {
     const u = localStorage.getItem('youdoo_user');
     return u ? JSON.parse(u) : null;
 }
+
+const LOGIN_TARGET_KEY = 'youdoo_login_target';
+let _wechatLoginConfigPromise = null;
+
+function getCurrentPageTarget(defaultTarget = 'task.html') {
+    const path = window.location.pathname.split('/').pop() || defaultTarget;
+    const search = window.location.search || '';
+    const hash = window.location.hash || '';
+    return `${path}${search}${hash}`;
+}
+
+function normalizeLoginTarget(target, defaultTarget = 'task.html') {
+    const raw = (target || '').trim();
+    if (!raw) return defaultTarget;
+    if (/^[a-z]+:/i.test(raw) || raw.startsWith('//')) return defaultTarget;
+
+    try {
+        const url = new URL(raw, window.location.origin + '/');
+        const path = url.pathname.replace(/^\/+/, '') || defaultTarget;
+        const allowed = new Set(['index.html', 'task.html', 'record.html']);
+        if (!allowed.has(path)) return defaultTarget;
+        return `${path}${url.search}${url.hash}`;
+    } catch (error) {
+        return defaultTarget;
+    }
+}
+
+function setPendingLoginTarget(target) {
+    localStorage.setItem(LOGIN_TARGET_KEY, normalizeLoginTarget(target, getCurrentPageTarget()));
+}
+
+function getPendingLoginTarget(defaultTarget = 'task.html', consume = false) {
+    const stored = localStorage.getItem(LOGIN_TARGET_KEY);
+    const target = normalizeLoginTarget(stored, defaultTarget);
+    if (consume) {
+        localStorage.removeItem(LOGIN_TARGET_KEY);
+    }
+    return target;
+}
+
+function isWeChatBrowser() {
+    return /MicroMessenger/i.test(navigator.userAgent || '');
+}
+
+async function getWechatLoginConfig() {
+    if (!_wechatLoginConfigPromise) {
+        _wechatLoginConfigPromise = apiGet('/auth/wechat/config')
+            .then(res => res.data || { enabled: false })
+            .catch(() => ({ enabled: false }));
+    }
+    return _wechatLoginConfigPromise;
+}
+
+async function startLoginFlow(target) {
+    const safeTarget = normalizeLoginTarget(target, getCurrentPageTarget());
+    setPendingLoginTarget(safeTarget);
+
+    const config = await getWechatLoginConfig();
+    if (config.enabled) {
+        window.location.href = `${API_BASE}/auth/wechat/login?target=${encodeURIComponent(safeTarget)}`;
+        return true;
+    }
+
+    window.location.href = 'index.html';
+    return false;
+}
+
+function installGuestTaskLoginHandler() {
+    if (getUser()) return;
+    if (!/^task\.html(?:[?#]|$)/i.test(getCurrentPageTarget('task.html'))) return;
+
+    const btnLogout = document.getElementById('btnLogout');
+    if (!btnLogout || btnLogout.dataset.loginBound === '1') return;
+
+    btnLogout.dataset.loginBound = '1';
+    btnLogout.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        startLoginFlow('task.html');
+    }, true);
+}
+
+function enhanceRecordLoginState() {
+    if (getUser()) return;
+    if (!/^record\.html(?:[?#]|$)/i.test(getCurrentPageTarget('record.html'))) return;
+
+    const emptyState = document.querySelector('.empty-recordings');
+    if (!emptyState || document.getElementById('btnRecordLogin')) return;
+
+    const actionWrap = document.createElement('div');
+    actionWrap.style.marginTop = '16px';
+    actionWrap.innerHTML = '<button type="button" id="btnRecordLogin" class="btn-record-ctrl btn-record">Sign in</button>';
+    emptyState.appendChild(actionWrap);
+
+    const btnRecordLogin = document.getElementById('btnRecordLogin');
+    if (btnRecordLogin) {
+        btnRecordLogin.addEventListener('click', () => startLoginFlow('record.html'));
+    }
+}
+
+installGuestTaskLoginHandler();
+
+setTimeout(() => {
+    installGuestTaskLoginHandler();
+    enhanceRecordLoginState();
+}, 0);
+
+window.addEventListener('load', () => {
+    installGuestTaskLoginHandler();
+    enhanceRecordLoginState();
+});
 
 function checkLogin() {
     if (!getUser()) {

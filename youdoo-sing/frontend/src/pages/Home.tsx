@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 
-const API_BASE_URL = 'http://sing.youdoogo.com:8000'
-
 function Home() {
   const [health, setHealth] = useState<string>('checking...')
 
@@ -12,7 +10,7 @@ function Home() {
 
   const checkHealth = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/health`)
+      const response = await axios.get('/health')
       setHealth(response.data.status)
     } catch (error) {
       setHealth('disconnected')
