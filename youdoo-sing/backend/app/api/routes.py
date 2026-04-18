@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Query, Body, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from typing import Optional, List
 import uuid
 import os
@@ -14,11 +14,15 @@ import re
 from datetime import datetime
 from difflib import SequenceMatcher
 import httpx
+from urllib.parse import urlencode, urlsplit
 
 # OpenAI API 配置（用于 DeepSeek 等兼容接口）
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1")
 OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "deepseek-ai/DeepSeek-V3")
+WECHAT_APP_ID = os.environ.get("WECHAT_APP_ID", "").strip()
+WECHAT_APP_SECRET = os.environ.get("WECHAT_APP_SECRET", "").strip()
+WECHAT_OAUTH_REDIRECT_URI = os.environ.get("WECHAT_OAUTH_REDIRECT_URI", "").strip()
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -1076,6 +1080,260 @@ else:
 
 # ============ 用户接口 ============
 
+WECHAT_LOGIN_TARGETS = {
+    "index.html",
+    "task.html",
+    "record.html",
+}
+
+
+def _is_wechat_login_enabled() -> bool:
+    return bool(WECHAT_APP_ID and WECHAT_APP_SECRET)
+
+
+def _sanitize_login_target(target: Optional[str], default: str = "task.html") -> str:
+    raw = (target or "").strip()
+    if not raw:
+        return default
+
+    parsed = urlsplit(raw)
+    if parsed.scheme or parsed.netloc:
+        return default
+
+    path = (parsed.path or "").lstrip("/")
+    if not path:
+        path = default
+    if path not in WECHAT_LOGIN_TARGETS:
+        return default
+
+    safe = path
+    if parsed.query:
+        safe += f"?{parsed.query}"
+    if parsed.fragment:
+        safe += f"#{parsed.fragment}"
+    return safe
+
+
+def _find_wechat_user(openid: str, unionid: str = ""):
+    if unionid:
+        for user in USERS_DB.values():
+            if user.get("wechat_unionid") == unionid:
+                return user
+    for user in USERS_DB.values():
+        if user.get("wechat_openid") == openid:
+            return user
+    return None
+
+
+def _upsert_wechat_user(token_data: dict, profile_data: dict) -> dict:
+    openid = (profile_data.get("openid") or token_data.get("openid") or "").strip()
+    unionid = (profile_data.get("unionid") or token_data.get("unionid") or "").strip()
+    if not openid:
+        raise ValueError("Missing WeChat openid")
+
+    nickname = (profile_data.get("nickname") or f"WeChatUser{openid[-6:]}").strip() or f"WeChatUser{openid[-6:]}"
+    avatar = (profile_data.get("headimgurl") or "").strip()
+    if not avatar:
+        avatar = f"https://api.dicebear.com/7.x/fun-emoji/svg?seed={nickname}"
+
+    existing_user = _find_wechat_user(openid, unionid)
+    user_id = existing_user["id"] if existing_user else f"wx_{hashlib.sha256((unionid or openid).encode('utf-8')).hexdigest()[:12]}"
+    now = datetime.utcnow().isoformat()
+
+    user = existing_user.copy() if existing_user else {"id": user_id, "created_at": now}
+    user.update({
+        "id": user_id,
+        "nickname": nickname,
+        "avatar": avatar,
+        "auth_provider": "wechat",
+        "wechat_openid": openid,
+        "wechat_unionid": unionid,
+        "wechat_scope": token_data.get("scope", "snsapi_userinfo"),
+        "last_login_at": now,
+    })
+    USERS_DB[user_id] = user
+    return user
+
+
+def _get_wechat_callback_url(request: Request) -> str:
+    if WECHAT_OAUTH_REDIRECT_URI:
+        return WECHAT_OAUTH_REDIRECT_URI
+    return str(request.url_for("wechat_login_callback"))
+
+
+def _build_wechat_authorize_url(request: Request, target: str) -> str:
+    params = {
+        "appid": WECHAT_APP_ID,
+        "redirect_uri": _get_wechat_callback_url(request),
+        "response_type": "code",
+        "scope": "snsapi_userinfo",
+        "state": target,
+    }
+    return "https://open.weixin.qq.com/connect/oauth2/authorize?" + urlencode(params) + "#wechat_redirect"
+
+
+async def _wechat_get_json(url: str, params: dict) -> dict:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+    if isinstance(data, dict) and data.get("errcode"):
+        raise ValueError(data.get("errmsg") or f"WeChat API error: {data['errcode']}")
+    return data
+
+
+def _render_wechat_callback_page(target: str, user: Optional[dict] = None, error: str = "") -> HTMLResponse:
+    safe_target = _sanitize_login_target(target)
+    user_json = json.dumps(user or {}, ensure_ascii=False).replace("</", "<\\/")
+    target_json = json.dumps(safe_target, ensure_ascii=False)
+    error_json = json.dumps(error or "", ensure_ascii=False)
+
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WeChat Login</title>
+    <style>
+        body {{
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f5f7fa;
+            color: #1f2937;
+        }}
+        .panel {{
+            max-width: 420px;
+            margin: 12vh auto 0;
+            background: #fff;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 14px 40px rgba(15, 23, 42, 0.12);
+            text-align: center;
+        }}
+        .title {{
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }}
+        .desc {{
+            font-size: 14px;
+            line-height: 1.6;
+            color: #4b5563;
+        }}
+        .link {{
+            display: inline-block;
+            margin-top: 18px;
+            padding: 10px 18px;
+            border-radius: 999px;
+            background: #07c160;
+            color: #fff;
+            text-decoration: none;
+            font-weight: 600;
+        }}
+    </style>
+</head>
+<body>
+    <div class="panel">
+        <div class="title" id="statusTitle">Signing in...</div>
+        <div class="desc" id="statusDesc">Please wait while we finish WeChat authorization.</div>
+        <a class="link" id="retryLink" href="#" style="display:none;">Back</a>
+    </div>
+    <script>
+        const user = {user_json};
+        const target = {target_json};
+        const error = {error_json};
+        const titleEl = document.getElementById('statusTitle');
+        const descEl = document.getElementById('statusDesc');
+        const retryLink = document.getElementById('retryLink');
+
+        if (user && user.id) {{
+            localStorage.setItem('youdoo_user', JSON.stringify(user));
+            titleEl.textContent = 'Login successful';
+            descEl.textContent = 'Redirecting...';
+            window.location.replace(target);
+        }} else {{
+            titleEl.textContent = 'Login failed';
+            descEl.textContent = error || 'Unable to complete WeChat login.';
+            retryLink.style.display = 'inline-block';
+            retryLink.href = target;
+        }}
+    </script>
+</body>
+</html>"""
+    return HTMLResponse(html)
+
+
+@router.get("/auth/wechat/config")
+async def wechat_login_config(request: Request):
+    callback_url = _get_wechat_callback_url(request)
+    enabled = _is_wechat_login_enabled()
+    return {
+        "success": True,
+        "data": {
+            "enabled": enabled,
+            "scope": "snsapi_userinfo",
+            "callback_url": callback_url if enabled else "",
+        },
+    }
+
+
+@router.get("/auth/wechat/login")
+async def wechat_login_redirect(request: Request, target: str = Query("task.html")):
+    if not _is_wechat_login_enabled():
+        raise HTTPException(status_code=400, detail="WeChat login is not configured")
+
+    safe_target = _sanitize_login_target(target)
+    return RedirectResponse(_build_wechat_authorize_url(request, safe_target), status_code=302)
+
+
+@router.get("/auth/wechat/callback", response_class=HTMLResponse, name="wechat_login_callback")
+async def wechat_login_callback(request: Request, code: Optional[str] = None, state: str = "task.html"):
+    safe_target = _sanitize_login_target(state)
+
+    if not _is_wechat_login_enabled():
+        return _render_wechat_callback_page(safe_target, error="WeChat login is not configured")
+
+    if not code or code == "authdeny":
+        return _render_wechat_callback_page(safe_target, error="WeChat authorization was cancelled")
+
+    try:
+        token_data = await _wechat_get_json(
+            "https://api.weixin.qq.com/sns/oauth2/access_token",
+            {
+                "appid": WECHAT_APP_ID,
+                "secret": WECHAT_APP_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+            },
+        )
+
+        profile_data = {
+            "openid": token_data.get("openid", ""),
+            "unionid": token_data.get("unionid", ""),
+        }
+
+        if token_data.get("access_token") and token_data.get("openid"):
+            try:
+                userinfo = await _wechat_get_json(
+                    "https://api.weixin.qq.com/sns/userinfo",
+                    {
+                        "access_token": token_data["access_token"],
+                        "openid": token_data["openid"],
+                        "lang": "zh_CN",
+                    },
+                )
+                profile_data.update(userinfo)
+            except Exception as profile_error:
+                print(f"[wechat] userinfo fallback: {profile_error}")
+
+        user = _upsert_wechat_user(token_data, profile_data)
+        _save_db()
+        return _render_wechat_callback_page(safe_target, user=user)
+    except Exception as exc:
+        print(f"[wechat] login callback failed: {exc}")
+        return _render_wechat_callback_page(safe_target, error=f"WeChat login failed: {exc}")
+
+
 @router.post("/user/login")
 async def user_login(nickname: str = Form(...)):
     """模拟微信登录"""
@@ -1084,6 +1342,7 @@ async def user_login(nickname: str = Form(...)):
         "id": user_id,
         "nickname": nickname,
         "avatar": f"https://api.dicebear.com/7.x/fun-emoji/svg?seed={nickname}",
+        "auth_provider": "mock",
     }
     USERS_DB[user_id] = user
     _save_db()

@@ -700,6 +700,12 @@
       "id": "284bdc4b",
       "nickname": "微信用户5807",
       "avatar": "https://api.dicebear.com/7.x/fun-emoji/svg?seed=微信用户5807"
+    },
+    "cfb12fd8": {
+      "id": "cfb12fd8",
+      "nickname": "微信用户4354",
+      "avatar": "https://api.dicebear.com/7.x/fun-emoji/svg?seed=微信用户4354",
+      "auth_provider": "mock"
     }
   },
   "finals": {}

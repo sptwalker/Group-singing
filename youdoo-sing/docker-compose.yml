@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
     container_name: youdoo-sing
     restart: unless-stopped
+    env_file:
+      - ./backend/.env
     ports:
       - "8000:8000"
     volumes:
