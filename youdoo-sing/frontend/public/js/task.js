@@ -7,7 +7,7 @@
     let currentSong = null;
     let sortMode = 'time';
     let focusSegId = null;
-    let expandedSegId = null; // 当前展开的歌词标�?
+    let expandedSegId = null; // 当前展开的歌词标�?
 
     // DOM
     const songTitle = document.getElementById('songTitle');
@@ -27,10 +27,10 @@
     const navNext = document.getElementById('navNext');
     const recordingList = document.getElementById('recordingList');
 
-    // WaveSurfer 可视化实�?
+    // WaveSurfer 可视化实�?
     let _visualizerWS = null;
 
-    // 退出登�?
+    // 退出登�?
     btnLogout.addEventListener('click', () => {
         if (confirm('确定退出登录？')) {
             localStorage.removeItem('youdoo_user');
@@ -66,7 +66,7 @@
             }
             loadSong(0);
         } catch (e) {
-            showToast('加载失败�? + e.message);
+            showToast('\u52a0\u8f7d\u5931\u8d25\uff1a' + e.message);
         }
     }
 
@@ -78,7 +78,7 @@
             currentSong = res.data;
         } catch (e) {
             console.error('[task] loadSong API error:', e);
-            showToast('加载歌曲失败�? + e.message);
+            showToast('\u52a0\u8f7d\u6b4c\u66f2\u5931\u8d25\uff1a' + e.message);
             return;
         }
         try {
@@ -91,11 +91,11 @@
             loadRecordings();
         } catch (e) {
             console.error('[task] renderSong error:', e);
-            showToast('渲染失败�? + e.message);
+            showToast('\u6e32\u67d3\u5931\u8d25\uff1a' + e.message);
         }
     }
 
-    // ===== 已发布成曲视�?=====
+    // ===== 已发布成曲视�?=====
     let _publishedAudio = null;
     let _publishedRAF = 0;
     let _publishedAudioCtx = null;
@@ -140,14 +140,14 @@
         btnPlayPause.style.display = 'none';
         btnStop.style.display = 'none';
 
-        // 修改录音区标�?
+        // 修改录音区标�?
         const recHeader = document.querySelector('.recordings-header');
         if (recHeader) {
             recHeader.querySelector('.recordings-title').textContent = '🎧 全部录音';
             const sortTabs = recHeader.querySelector('.sort-tabs');
             if (sortTabs) sortTabs.style.display = 'none';
         }
-        // 强制按歌词顺序排�?
+        // 强制按歌词顺序排�?
         sortMode = 'order';
         focusSegId = null;
 
@@ -165,7 +165,7 @@
             <div class="published-banner">
                 <div class="published-badge">全曲已完成，请欣赏！</div>
                 <div class="published-player">
-                    <button class="published-play-btn" id="pubPlayBtn">�?/button>
+                    <button class="published-play-btn" id="pubPlayBtn">�?/button>
                     <div class="published-info-col">
                         <canvas class="published-wave-canvas" id="pubWaveCanvas" width="800" height="44"></canvas>
                         <div class="published-progress-row">
@@ -175,7 +175,7 @@
                             <span class="published-time" id="pubTimeLabel">0:00 / ${formatTime(pf.duration || 0)}</span>
                         </div>
                     </div>
-                    <a class="published-download-btn" href="${finalAudioUrl}" download title="下载">�?/a>
+                    <a class="published-download-btn" href="${finalAudioUrl}" download title="下载">�?/a>
                 </div>
             </div>`;
 
@@ -186,19 +186,19 @@
         pubPlayBtn.addEventListener('click', () => {
             if (_publishedAudio && !_publishedAudio.paused) {
                 _publishedAudio.pause();
-                pubPlayBtn.textContent = '�?;
+                pubPlayBtn.textContent = '\u25b6';
                 pubPlayBtn.classList.remove('playing');
                 return;
             }
             if (_publishedAudio && _publishedAudio.paused && _publishedAudio.currentTime > 0) {
                 _publishedAudio.play();
-                pubPlayBtn.textContent = '�?;
+                pubPlayBtn.textContent = '\u23f8';
                 pubPlayBtn.classList.add('playing');
                 _startPublishedTick();
                 _startPublishedWave();
                 return;
             }
-            // 新播�?
+            // 新播�?
             _stopPublishedPlayback();
             const audio = new Audio(finalAudioUrl);
             audio.crossOrigin = 'anonymous';
@@ -222,7 +222,7 @@
             }, { once: true });
 
             audio.addEventListener('ended', () => {
-                pubPlayBtn.textContent = '�?;
+                pubPlayBtn.textContent = '\u25b6';
                 pubPlayBtn.classList.remove('playing');
                 _stopPublishedPlayback();
                 const fill = document.getElementById('pubProgressFill');
@@ -232,13 +232,13 @@
             });
 
             audio.play().catch(() => {});
-            pubPlayBtn.textContent = '�?;
+            pubPlayBtn.textContent = '\u23f8';
             pubPlayBtn.classList.add('playing');
             _startPublishedTick();
             _startPublishedWave();
         });
 
-        // 进度�?seek
+        // 进度�?seek
         pubProgressTrack.addEventListener('click', (e) => {
             if (!_publishedAudio) return;
             const rect = pubProgressTrack.getBoundingClientRect();
@@ -296,10 +296,10 @@
 
     function restoreTaskView() {
         _stopPublishedPlayback();
-        // 移除发布播放�?
+        // 移除发布播放�?
         const playerSection = document.getElementById('publishedPlayerSection');
         if (playerSection) playerSection.remove();
-        // 恢复任务区元�?
+        // 恢复任务区元�?
         document.querySelector('.lyrics-list-section').style.display = '';
         document.querySelector('.header-stats').style.display = '';
         document.querySelector('.play-controls').style.display = '';
@@ -309,7 +309,7 @@
         navNext.style.display = '';
         const recHeader = document.querySelector('.recordings-header');
         if (recHeader) {
-            recHeader.querySelector('.recordings-title').textContent = '🎧 大家的录�?;
+            recHeader.querySelector('.recordings-title').textContent = '\ud83c\udfa7 \u5927\u5bb6\u7684\u5f55\u97f3';
             const sortTabs = recHeader.querySelector('.sort-tabs');
             if (sortTabs) sortTabs.style.display = '';
         }
@@ -335,7 +335,7 @@
         lyricsTaskList.innerHTML = segs.map((seg, i) => {
             const isCompleted = seg.status === 'completed';
             const submitCount = seg.submit_count || 0;
-            const diffLabels = { easy: '简', normal: '�?, hard: '�? };
+            const diffLabels = { easy: '\u7b80', normal: '\u4e2d', hard: '\u96be' };
             const diffCls = seg.difficulty;
 
             return `
@@ -343,13 +343,13 @@
                     <div class="lyric-task-main">
                         <span class="lyric-task-num">${seg.index}</span>
                         <span class="lyric-task-diff diff-${diffCls}">${diffLabels[seg.difficulty]}</span>
-                        ${seg.is_chorus ? '<span class="lyric-task-chorus">�?/span>' : ''}
-                        <span class="lyric-task-text">${seg.lyrics || '�?�?�?}</span>
+                        ${seg.is_chorus ? '<span class="lyric-task-chorus">\u5408\u5531</span>' : ''}
+                        <span class="lyric-task-text">${seg.lyrics || '...'}</span>
                         <span class="lyric-task-count ${submitCount > 0 ? 'has-submit' : ''}">${submitCount}人次</span>
                     </div>
                     <div class="lyric-task-expand" data-seg-id="${seg.id}" style="display:none;">
-                        <button class="lyric-task-btn btn-lt-play" data-seg-id="${seg.id}">�?试听</button>
-                        <button class="lyric-task-btn btn-lt-record ${isCompleted ? 'disabled' : ''}" data-seg-id="${seg.id}" ${isCompleted ? 'disabled' : ''}>🎤 录音</button>
+                        <button class="lyric-task-btn btn-lt-play" data-seg-id="${seg.id}">\u25b6 \u8bd5\u542c</button>
+                        <button class="lyric-task-btn btn-lt-record ${isCompleted ? 'disabled' : ''}" data-seg-id="${seg.id}" ${isCompleted ? 'disabled' : ''}>\ud83c\udfa4 \u5f55\u97f3</button>
                     </div>
                 </div>
             `;
@@ -385,7 +385,7 @@
         const seg = currentSong.segments.find(s => s.id === segId);
         if (!seg) return;
 
-        // 收起之前展开�?
+        // 收起之前展开�?
         lyricsTaskList.querySelectorAll('.lyric-task-item').forEach(it => {
             if (it.dataset.segId !== segId) {
                 it.classList.remove('expanded');
@@ -422,14 +422,14 @@
 
         if (btn.classList.contains('playing')) {
             AudioManager.stop();
-            btn.textContent = '�?试听';
+            btn.textContent = '�?试听';
             btn.classList.remove('playing');
             return;
         }
 
         // 停止其他播放按钮
         lyricsTaskList.querySelectorAll('.btn-lt-play.playing').forEach(b => {
-            b.textContent = '�?试听';
+            b.textContent = '�?试听';
             b.classList.remove('playing');
         });
         resetPlayButtons();
@@ -439,7 +439,7 @@
         ensureVisualizer(audioUrl);
         AudioManager.playRange(audioUrl, seg.start_time, seg.end_time,
             () => {
-                btn.textContent = '�?试听';
+                btn.textContent = '�?试听';
                 btn.classList.remove('playing');
                 if (_visualizerWS) _visualizerWS.seekTo(0);
             },
@@ -449,7 +449,7 @@
                 }
             }
         );
-        btn.textContent = '�?停止';
+        btn.textContent = '�?停止';
         btn.classList.add('playing');
     }
 
@@ -475,7 +475,7 @@
             localStorage.setItem('youdoo_record_song', JSON.stringify(currentSong));
             window.location.href = 'record.html';
         } catch (e) {
-            showToast('认领失败�? + e.message);
+            showToast('\u8ba4\u9886\u5931\u8d25\uff1a' + e.message);
         }
     }
 
@@ -514,21 +514,21 @@
 
     btnPlayPause.addEventListener('click', () => {
         const audio = AudioManager.getCurrent();
-        // 当前正在播放 �?暂停
+        // 当前正在播放 �?暂停
         if (audio && isFullPlaying && !audio.paused) {
             audio.pause();
-            btnPlayPause.textContent = '�?;
+            btnPlayPause.textContent = '\u25b6';
             btnPlayPause.classList.remove('active');
             return;
         }
-        // 当前已暂�?�?恢复
+        // 当前已暂�?�?恢复
         if (audio && isFullPlaying && audio.paused) {
             audio.play();
-            btnPlayPause.textContent = '�?;
+            btnPlayPause.textContent = '\u23f8';
             btnPlayPause.classList.add('active');
             return;
         }
-        // 未在播放 �?开始播�?
+        // 未在播放 �?开始播�?
         if (!currentSong) return;
         const audioUrl = `${API_BASE.replace('/api', '')}${currentSong.audio_url}`;
         ensureVisualizer(audioUrl);
@@ -547,7 +547,7 @@
             }
         );
         isFullPlaying = true;
-        btnPlayPause.textContent = '�?;
+        btnPlayPause.textContent = '\u23f8';
         btnPlayPause.classList.add('active');
     });
 
@@ -570,7 +570,7 @@
     });
 
     function resetPlayButtons() {
-        btnPlayPause.textContent = '�?;
+        btnPlayPause.textContent = '\u25b6';
         btnPlayPause.classList.remove('active');
     }
 
@@ -585,7 +585,7 @@
             fd.append('user_name', currentUser.nickname);
             const res = await apiPost('/segments/random-claim', fd);
             if (res.success) {
-                showToast('随机认领成功�?);
+                showToast('\u968f\u673a\u8ba4\u9886\u6210\u529f');
                 const seg = res.data;
                 localStorage.setItem('youdoo_record_segment', JSON.stringify(seg));
                 localStorage.setItem('youdoo_record_song', JSON.stringify(currentSong));
@@ -594,7 +594,7 @@
                 }, 300);
             }
         } catch (e) {
-            showToast('随机认领失败�? + e.message);
+            showToast('\u968f\u673a\u8ba4\u9886\u5931\u8d25\uff1a' + e.message);
         }
     });
 
@@ -652,7 +652,7 @@
         if (resetButton) {
             const prevBtn = recordingList.querySelector(`.btn-play-mini[data-rec-idx="${_playingIdx}"]`);
             if (prevBtn) {
-                prevBtn.textContent = '�?;
+                prevBtn.textContent = '\u25b6';
                 prevBtn.classList.remove('playing');
             }
         }
@@ -672,7 +672,7 @@
     }
 
     function updateLyricsSubmitCounts() {
-        // �?recordings 数组统计每个 segment_id 的提交人�?
+        // �?recordings 数组统计每个 segment_id 的提交人�?
         const countMap = {};
         recordings.forEach(r => {
             countMap[r.segment_id] = (countMap[r.segment_id] || 0) + 1;
@@ -708,7 +708,7 @@
         }
 
         if (list.length === 0) {
-            recordingList.innerHTML = '<div class="empty-recordings">还没有人提交录音，快来第一个吧�?/div>';
+            recordingList.innerHTML = '<div class="empty-recordings">\u8fd8\u6ca1\u6709\u4eba\u63d0\u4ea4\u5f55\u97f3\uff0c\u5feb\u6765\u7b2c\u4e00\u4e2a\u5427</div>';
             return;
         }
 
@@ -736,11 +736,11 @@
                             <div class="rec-seg-num">#${seg ? seg.index : '?'} ${seg ? seg.lyrics : ''}</div>
                         </div>
                         <div class="rec-like" data-id="${rec.id}">
-                            �?<span>${rec.likes}</span>
+                            \u2764<span>${rec.likes}</span>
                         </div>
                     </div>
                     <div class="rec-card-bottom">
-                        <button class="btn-play-mini" data-rec-idx="${i}">�?/button>
+                        <button class="btn-play-mini" data-rec-idx="${i}">\u25b6</button>
                         <div class="rec-wave-container" id="taskRecW${i}"></div>
                     </div>
                 </div>
@@ -787,12 +787,12 @@
                 if (!ws) return;
                 ws.un('finish');
                 ws.on('finish', () => {
-                    btn.textContent = '�?;
+                    btn.textContent = '\u25b6';
                     btn.classList.remove('playing');
                     _playingIdx = -1;
                 });
                 ws.play();
-                btn.textContent = '�?;
+                btn.textContent = '\u23f8';
                 btn.classList.add('playing');
                 _playingIdx = idx;
             });
