@@ -214,6 +214,7 @@ function getUser() {
 
 const LOGIN_TARGET_KEY = 'youdoo_login_target';
 let _wechatLoginConfigPromise = null;
+let _wechatCallbackPromise = null;
 
 function getCurrentPageTarget(defaultTarget = 'task.html') {
     const path = window.location.pathname.split('/').pop() || defaultTarget;
@@ -251,6 +252,31 @@ function getPendingLoginTarget(defaultTarget = 'task.html', consume = false) {
     return target;
 }
 
+function getWechatCallbackParams() {
+    const params = new URLSearchParams(window.location.search || '');
+    return {
+        code: params.get('code') || '',
+        state: params.get('state') || '',
+        appid: params.get('appid') || '',
+        from: params.get('from') || '',
+        isappinstalled: params.get('isappinstalled') || '',
+    };
+}
+
+function hasWechatAuthCallbackParams() {
+    const params = getWechatCallbackParams();
+    return !!params.code;
+}
+
+function clearWechatCallbackParams() {
+    const url = new URL(window.location.href);
+    ['code', 'state', 'appid', 'from', 'isappinstalled'].forEach((key) => {
+        url.searchParams.delete(key);
+    });
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState({}, document.title, nextUrl);
+}
+
 function isWeChatBrowser() {
     return /MicroMessenger/i.test(navigator.userAgent || '');
 }
@@ -276,6 +302,38 @@ async function startLoginFlow(target) {
 
     window.location.href = 'index.html';
     return false;
+}
+
+async function handleWechatAuthCallback() {
+    if (_wechatCallbackPromise) return _wechatCallbackPromise;
+    if (!hasWechatAuthCallbackParams()) return null;
+
+    const params = getWechatCallbackParams();
+    const safeTarget = normalizeLoginTarget(
+        params.state,
+        getPendingLoginTarget(getCurrentPageTarget('task.html'))
+    );
+    setPendingLoginTarget(safeTarget);
+
+    _wechatCallbackPromise = apiGet(
+        `/auth/wechat/callback?mode=json&code=${encodeURIComponent(params.code)}&state=${encodeURIComponent(safeTarget)}`
+    ).then((res) => {
+        const data = res.data || {};
+        const user = data.user || null;
+        const target = normalizeLoginTarget(data.target || safeTarget, safeTarget);
+        if (!user || !user.id) {
+            throw new Error('Missing WeChat user info');
+        }
+        localStorage.setItem('youdoo_user', JSON.stringify(user));
+        setPendingLoginTarget(target);
+        clearWechatCallbackParams();
+        return { user, target };
+    }).catch((error) => {
+        clearWechatCallbackParams();
+        throw error;
+    });
+
+    return _wechatCallbackPromise;
 }
 
 function installGuestTaskLoginHandler() {
@@ -322,6 +380,24 @@ window.addEventListener('load', () => {
     installGuestTaskLoginHandler();
     enhanceRecordLoginState();
 });
+
+if (hasWechatAuthCallbackParams()) {
+    window.__YOUDOO_WECHAT_AUTH_PENDING = true;
+    handleWechatAuthCallback()
+        .then(({ target }) => {
+            window.__YOUDOO_WECHAT_AUTH_PENDING = false;
+            window.location.replace(target || getPendingLoginTarget('task.html', true));
+        })
+        .catch((error) => {
+            window.__YOUDOO_WECHAT_AUTH_PENDING = false;
+            showToast(error.message || 'WeChat login failed');
+            setTimeout(() => {
+                window.location.replace('index.html');
+            }, 800);
+        });
+} else {
+    window.__YOUDOO_WECHAT_AUTH_PENDING = false;
+}
 
 function checkLogin() {
     if (!getUser()) {

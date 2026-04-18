@@ -37,6 +37,10 @@
     }
 
     if (!user) {
+        if (hasWechatAuthCallbackParams() || window.__YOUDOO_WECHAT_AUTH_PENDING) {
+            renderUnavailable('Signing in...', 'Please wait while WeChat login completes.');
+            return;
+        }
         renderUnavailable('Login required', 'Open the home page and sign in before recording.');
         return;
     }

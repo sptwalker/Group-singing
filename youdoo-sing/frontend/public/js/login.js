@@ -1,4 +1,13 @@
 (function () {
+    if (hasWechatAuthCallbackParams()) {
+        const btnLogin = document.getElementById('btnLogin');
+        if (btnLogin) {
+            btnLogin.disabled = true;
+            btnLogin.innerHTML = '<span class="wechat-icon">&#128241;</span> 登录中...';
+        }
+        return;
+    }
+
     if (getUser()) {
         window.location.href = getPendingLoginTarget('task.html', true);
         return;

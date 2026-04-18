@@ -2,6 +2,9 @@
 (function () {
     const user = getUser();
     if (!user) {
+        if (hasWechatAuthCallbackParams() || window.__YOUDOO_WECHAT_AUTH_PENDING) {
+            return;
+        }
         setPendingLoginTarget(getCurrentPageTarget('task.html'));
         window.location.replace('index.html');
         return;
