@@ -1263,6 +1263,30 @@ def _render_wechat_callback_page(target: str, user: Optional[dict] = None, error
     return HTMLResponse(html)
 
 
+def _wechat_callback_response(
+    target: str,
+    user: Optional[dict] = None,
+    error: str = "",
+    json_mode: bool = False,
+    status_code: int = 200,
+):
+    safe_target = _sanitize_login_target(target)
+    if json_mode:
+        if error:
+            return JSONResponse({"detail": error, "target": safe_target}, status_code=status_code)
+        return JSONResponse(
+            {
+                "success": True,
+                "data": {
+                    "user": user or {},
+                    "target": safe_target,
+                },
+            },
+            status_code=status_code,
+        )
+    return _render_wechat_callback_page(safe_target, user=user, error=error)
+
+
 @router.get("/auth/wechat/config")
 async def wechat_login_config(request: Request):
     callback_url = _get_wechat_callback_url(request)
@@ -1287,14 +1311,30 @@ async def wechat_login_redirect(request: Request, target: str = Query("task.html
 
 
 @router.get("/auth/wechat/callback", response_class=HTMLResponse, name="wechat_login_callback")
-async def wechat_login_callback(request: Request, code: Optional[str] = None, state: str = "task.html"):
+async def wechat_login_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: str = "task.html",
+    mode: str = Query(""),
+):
     safe_target = _sanitize_login_target(state)
+    json_mode = (mode or "").strip().lower() == "json"
 
     if not _is_wechat_login_enabled():
-        return _render_wechat_callback_page(safe_target, error="WeChat login is not configured")
+        return _wechat_callback_response(
+            safe_target,
+            error="WeChat login is not configured",
+            json_mode=json_mode,
+            status_code=400,
+        )
 
     if not code or code == "authdeny":
-        return _render_wechat_callback_page(safe_target, error="WeChat authorization was cancelled")
+        return _wechat_callback_response(
+            safe_target,
+            error="WeChat authorization was cancelled",
+            json_mode=json_mode,
+            status_code=400,
+        )
 
     try:
         token_data = await _wechat_get_json(
@@ -1328,10 +1368,15 @@ async def wechat_login_callback(request: Request, code: Optional[str] = None, st
 
         user = _upsert_wechat_user(token_data, profile_data)
         _save_db()
-        return _render_wechat_callback_page(safe_target, user=user)
+        return _wechat_callback_response(safe_target, user=user, json_mode=json_mode)
     except Exception as exc:
         print(f"[wechat] login callback failed: {exc}")
-        return _render_wechat_callback_page(safe_target, error=f"WeChat login failed: {exc}")
+        return _wechat_callback_response(
+            safe_target,
+            error=f"WeChat login failed: {exc}",
+            json_mode=json_mode,
+            status_code=400,
+        )
 
 
 @router.post("/user/login")
