@@ -699,6 +699,10 @@
     btnRandom.addEventListener('click', async () => {
         const currentUser = requireUser('Please sign in before random claim');
         if (!currentUser) return;
+        if (!currentSong) {
+            showToast('暂无拼歌任务');
+            return;
+        }
         try {
             const fd = new FormData();
             fd.append('song_id', currentSong.id);
