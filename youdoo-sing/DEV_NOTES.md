@@ -16,7 +16,7 @@ YouDoo Sing 是一个纯 Web 端多人群唱系统，支持歌曲上传、波形
 | 音频存储 | `backend/uploads/` 目录（录音 webm），`backend/finals/` 目录（合成成曲） |
 | 音频处理 | librosa + soundfile + scipy + numpy（合成引擎），ffmpeg（格式转换） |
 | 前端服务 | `python -m http.server 3000 --directory frontend/public` |
-| 后端服务 | `cd backend && python main.py`（uvicorn 0.0.0.0:8000） |
+| 后端服务 | `cd backend && python main.py`（uvicorn 0.0.0.0:80） |
 
 > 注意：`models/`, `schemas/`, `core/database.py` 等 SQLAlchemy 相关代码为早期遗留，**当前未使用**，实际数据全部走 JSON 文件。
 
@@ -363,7 +363,7 @@ finals/
 ## 十三、admin-core.js API 工具
 
 ```javascript
-const API = 'http://127.0.0.1:8000/api';
+const API = 'http://127.0.0.1/api';
 adminFetch(path, opts)  // 通用请求，自动加 Bearer token，401 自动登出
 aGet(p)   // GET
 aPut(p,b) // PUT + JSON body
@@ -407,7 +407,7 @@ ffmpeg -version
 ## 十五、启动方式
 
 ```bash
-# 后端（端口 8000）
+# 后端（端口 80）
 cd youdoo-sing/backend
 python -m venv venv
 venv\Scripts\activate        # Windows

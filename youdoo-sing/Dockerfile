@@ -26,11 +26,11 @@ COPY backend/ /app/backend/
 
 RUN mkdir -p /app/backend/data /app/backend/uploads /app/backend/finals /music
 
-EXPOSE 8000
+EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost/health || exit 1
 
 WORKDIR /app/backend
 
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
