@@ -10,8 +10,8 @@ services:
     env_file:
       - ./backend/.env
     ports:
-      - "80:80"
-    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80", "--reload"]
+      - "8000:8000"
+    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     volumes:
       # 开发模式：直接挂载本地目录，代码修改即时生效
       - ./backend:/app/backend
@@ -23,7 +23,7 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
       - OPENAI_CHAT_MODEL=${OPENAI_CHAT_MODEL:-deepseek-ai/DeepSeek-V3}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
