@@ -513,6 +513,8 @@ let _expPlayingRecIdx = -1; // 正在播放的录音索引
 let _expIsPlaying = false;
 let _expRAF = 0;
 let _expAccUrl = null;      // 伴奏URL（检测通过后设置）
+let _expZoom = 100;         // 缩放百分比（100=自适应基准）
+let _expBaseWaveWidth = 0;  // 基准波形宽度（100%时的宽度）
 
 // ---- Web Audio API 实时音效预览 ----
 let _expAudioCtx = null;       // AudioContext 单例
@@ -786,6 +788,8 @@ async function _expLoadSong() {
             _expRenderRecPanel();
         } else {
             _expAccUrl = null;
+    _expZoom = 100;
+    _expBaseWaveWidth = 0;
             if (accStatus) accStatus.innerHTML = '';
             // 无伴奏：显示空白提示
             document.getElementById('expPlaybar').innerHTML = '';
@@ -809,6 +813,9 @@ function _expCleanup() {
     _expSong = null; _expSegs = []; _expFreeTasks = []; _expActiveSegIdx = -1;
     _expIsPlaying = false; _expPlayingRecIdx = -1;
     _expAccUrl = null;
+    _expZoom = 100; _expBaseWaveWidth = 0;
+    _expZoom = 100;
+    _expBaseWaveWidth = 0;
     _expFxBuffers = [];
     _expFxNodes = [];
 }
@@ -844,6 +851,13 @@ function _expRenderPlaybar() {
         <button class="play-btn-main" id="expPlayBtn" title="播放伴奏+录音">▶</button>
         <span class="playbar-time" id="expPbTime">0:00 / ${fmtTime(_expSong.duration||0)}</span>
         <div class="playbar-track" id="expPbTrack"><div class="playbar-fill" id="expPbFill"></div></div>
+        <div class="zoom-control exp-zoom-control">
+            <span>缩放</span>
+            <button class="btn btn-outline btn-sm" id="expZoomOut" type="button">－</button>
+            <input type="range" id="expZoomSlider" min="20" max="400" step="10" value="${_expZoom}">
+            <button class="btn btn-outline btn-sm" id="expZoomIn" type="button">＋</button>
+            <span id="expZoomValue">${_expZoom}%</span>
+        </div>
     </div>`;
     // 创建伴奏 Audio
     _expAudio = new Audio(_expAccUrl || _expBuildUrl(_expSong.audio_url));
@@ -876,6 +890,10 @@ function _expRenderPlaybar() {
         _expUpdatePlaybarUI();
         _expUpdateCursor();
     });
+    // 缩放控件事件
+    document.getElementById('expZoomSlider').addEventListener('input', e => _expSetZoom(Number(e.target.value)));
+    document.getElementById('expZoomOut').addEventListener('click', () => _expSetZoom(_expZoom - 10));
+    document.getElementById('expZoomIn').addEventListener('click', () => _expSetZoom(_expZoom + 10));
     // 准备已选定录音的 Audio 对象
     _expPrepareRecAudios();
 }
@@ -935,7 +953,7 @@ function _expRenderWavePanel() {
             <div class="export-wave-host" id="expWaveHost">
                 <div id="expWaveWrap" style="width:100%;height:240px;"></div>
                 <div class="export-overlay" id="expOverlay"></div>
-                <div class="export-cursor-line" id="expCursorLine" style="display:none;"></div>
+                <div class="export-cursor-line" id="expCursorLine" style="display:none;"><div class="export-cursor-handle" id="expCursorHandle"></div></div>
             </div>
             <div class="export-free-track" id="expFreeTrack">
                 <span class="export-free-track-label">Free Track</span>
@@ -948,9 +966,10 @@ function _expRenderWavePanel() {
     const scrollEl = document.getElementById('expWaveScroll');
     // 点击空白取消选中 + 点击波形定位播放进度
     scrollEl.addEventListener('click', e => {
-        if (e.target.closest('.export-seg-block') || e.target.closest('.mini-rec-capsule')) return;
+        if (e.target.closest('.export-seg-block') || e.target.closest('.mini-rec-capsule') || e.target.closest('.export-cursor-handle')) return;
         // 如果是拖拽结束，不触发点击
         if (_expDragState && _expDragState.moved) return;
+        if (_expHandleDragging) return;
         // 点击波形区域定位播放进度
         const host = document.getElementById('expWaveHost');
         if (host && _expAudio) {
@@ -969,6 +988,15 @@ function _expRenderWavePanel() {
     });
     // 拖拽滚动
     _expBindDragScroll(scrollEl);
+    // 进度线手柄拖拽
+    _expBindCursorHandleDrag(scrollEl);
+    // Ctrl+滚轮缩放
+    scrollEl.addEventListener('wheel', e => {
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        e.stopPropagation();
+        _expSetZoom(_expZoom + (e.deltaY < 0 ? 10 : -10));
+    }, { passive: false });
     _expInitWS();
 }
 
@@ -989,6 +1017,45 @@ function _expBindDragScroll(scrollEl) {
         if (_expDragState) {
             setTimeout(() => { _expDragState = null; }, 0);
         }
+    });
+}
+
+let _expHandleDragging = false;
+
+function _expBindCursorHandleDrag(scrollEl) {
+    const handle = document.getElementById('expCursorHandle');
+    const line = document.getElementById('expCursorLine');
+    if (!handle || !line) return;
+
+    handle.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        e.preventDefault();
+        _expHandleDragging = true;
+        line.classList.add('dragging');
+    });
+
+    document.addEventListener('mousemove', e => {
+        if (!_expHandleDragging) return;
+        e.preventDefault();
+        const host = document.getElementById('expWaveHost');
+        if (!host || !_expAudio) return;
+        const dur = _expAudio.duration || _expSong?.duration || 0;
+        if (!dur) return;
+        const hostRect = host.getBoundingClientRect();
+        const x = e.clientX - hostRect.left + scrollEl.scrollLeft;
+        const hostW = host.scrollWidth || host.clientWidth || 1;
+        const ratio = Math.max(0, Math.min(1, x / hostW));
+        _expAudio.currentTime = ratio * dur;
+        _expUpdateCursor();
+        _expUpdatePlaybarUI();
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!_expHandleDragging) return;
+        _expHandleDragging = false;
+        line.classList.remove('dragging');
+        _expSyncRecAudios();
     });
 }
 
@@ -1018,7 +1085,7 @@ function _expInitWS() {
     });
     _expWS.on('ready', () => {
         _expWS.setMuted?.(true);
-        _expApplyZoom();
+        _expApplyZoom({ fit: true });
         _expRenderOverlay();
         _expRenderFreeTrack();
         _expRenderTimeline();
@@ -1026,21 +1093,30 @@ function _expInitWS() {
     _expWS.on('error', () => { _expRenderOverlay(); });
 }
 
-function _expApplyZoom() {
+function _expApplyZoom({ fit = false } = {}) {
     if (!_expWS || !_expSong) return;
     const dur = _expWS.getDuration() || _expSong.duration || 1;
     const scroll = document.getElementById('expWaveScroll');
     const viewW = scroll?.clientWidth || 600;
-    // 计算需要的最小总宽度：确保每个唱段至少 EXP_MIN_SEG_PX
-    let neededW = viewW;
+    // 计算基准宽度：确保每个唱段至少 EXP_MIN_SEG_PX
+    let baseW = viewW;
     _expSegs.forEach(seg => {
         const segDur = seg.end_time - seg.start_time;
         const naturalW = (segDur / dur) * viewW;
         if (naturalW < EXP_MIN_SEG_PX) {
-            neededW = Math.max(neededW, (EXP_MIN_SEG_PX / segDur) * dur);
+            baseW = Math.max(baseW, (EXP_MIN_SEG_PX / segDur) * dur);
         }
     });
+    _expBaseWaveWidth = baseW;
+    // 首次加载时设置 zoom=100
+    if (fit) _expZoom = 100;
+    const neededW = fit ? baseW : Math.max(baseW, baseW * (_expZoom / 100));
     const pxPerSec = neededW / dur;
+    // 记录缩放前滚动中心比例
+    const beforeLeft = scroll?.scrollLeft || 0;
+    const beforeCenter = scroll ? beforeLeft + scroll.clientWidth / 2 : 0;
+    const oldHostW = document.getElementById('expWaveHost')?.scrollWidth || neededW;
+    const beforeCenterRatio = oldHostW > 0 ? beforeCenter / oldHostW : 0;
     try { _expWS.zoom(pxPerSec); } catch(e){}
     const host = document.getElementById('expWaveHost');
     if (host) host.style.width = `${Math.ceil(neededW)}px`;
@@ -1048,7 +1124,29 @@ function _expApplyZoom() {
     if (freeTrack) freeTrack.style.width = `${Math.ceil(neededW)}px`;
     const timeline = document.getElementById('expTimeline');
     if (timeline) timeline.style.width = `${Math.ceil(neededW)}px`;
-    _expRenderFreeTrack();
+    // 缩放后保持视觉中心
+    requestAnimationFrame(() => {
+        if (scroll && neededW > scroll.clientWidth) {
+            const targetCenter = beforeCenterRatio * neededW;
+            scroll.scrollLeft = Math.max(0, targetCenter - scroll.clientWidth / 2);
+        } else if (scroll) {
+            scroll.scrollLeft = 0;
+        }
+        _expRenderOverlay();
+        _expRenderFreeTrack();
+        _expRenderTimeline();
+        _expUpdateCursor();
+    });
+}
+
+function _expSetZoom(value) {
+    const next = Math.max(20, Math.min(400, Math.round((Number(value) || 100) / 10) * 10));
+    _expZoom = next;
+    const slider = document.getElementById('expZoomSlider');
+    const valueEl = document.getElementById('expZoomValue');
+    if (slider) slider.value = String(next);
+    if (valueEl) valueEl.textContent = `${next}%`;
+    _expApplyZoom();
 }
 
 function _expRenderTimeline() {

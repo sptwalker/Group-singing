@@ -1448,9 +1448,15 @@ tbody tr:last-child td { border-bottom: none; }
 .export-playbar .playbar-time { font-size:12px; font-family:monospace; color:var(--text-secondary); min-width:100px; }
 .export-playbar .playbar-track { flex:1; height:4px; background:var(--border); border-radius:2px; position:relative; cursor:pointer; }
 .export-playbar .playbar-fill { height:100%; background:var(--primary); border-radius:2px; transition:width .1s linear; }
+.export-playbar .exp-zoom-control { flex-shrink:0; margin-left:8px; border-left:1px solid var(--border); padding-left:12px; }
+.export-playbar .exp-zoom-control input[type="range"] { width:100px; }
 
 /* 光标线 */
 .export-cursor-line { position:absolute; top:0; bottom:0; width:2px; background:#ef4444; z-index:10; pointer-events:none; transition:left .05s linear; }
+.export-cursor-line.dragging { transition:none; }
+.export-cursor-handle { position:absolute; top:-6px; left:50%; transform:translateX(-50%); width:14px; height:14px; border-radius:50%; background:#ef4444; border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,0.3); cursor:grab; pointer-events:all; z-index:11; }
+.export-cursor-handle:active { cursor:grabbing; transform:translateX(-50%) scale(1.2); }
+.export-cursor-handle:hover { box-shadow:0 1px 8px rgba(239,68,68,0.5); }
 
 /* 波形区域点击定位 */
 .export-wave-host { cursor:crosshair; }

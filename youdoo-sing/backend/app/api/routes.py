@@ -2574,7 +2574,7 @@ async def admin_unselect_recording(recording_id: str, request: Request):
 
 @router.post("/admin/recordings/{recording_id}/trim")
 async def admin_trim_recording(recording_id: str, request: Request):
-    """裁剪录音：去掉开头和结尾指定秒数的音频"""
+    """裁剪录音：将开头和结尾指定秒数的音频静音（保持总时长不变）"""
     verify_admin(request)
     body = await request.json()
     trim_start = float(body.get("trim_start", 0))
@@ -2609,31 +2609,35 @@ async def admin_trim_recording(recording_id: str, request: Request):
     if total_duration > 0 and (trim_start + trim_end) >= total_duration:
         raise HTTPException(status_code=400, detail="裁剪范围超出音频时长")
 
-    # 使用 ffmpeg 裁剪
+    # 使用 ffmpeg volume 滤镜将裁剪区域静音，保持总时长不变
+    # 构建 volume 滤镜表达式：
+    #   - 0 ~ trim_start 秒：静音
+    #   - trim_start ~ (total_duration - trim_end) 秒：保持原声
+    #   - (total_duration - trim_end) ~ total_duration 秒：静音
     ext = os.path.splitext(filename)[1]
     tmp_path = src_path + ".trimmed" + ext
-    cmd = ["ffmpeg", "-y", "-i", src_path]
+
+    volume_expr_parts = []
     if trim_start > 0:
-        cmd += ["-ss", str(trim_start)]
+        volume_expr_parts.append(f"between(t,0,{trim_start})")
     if trim_end > 0 and total_duration > 0:
-        end_time = total_duration - trim_end
-        cmd += ["-to", str(end_time - trim_start)]  # -to is relative to -ss
-    cmd += ["-c", "copy", tmp_path]
+        mute_from = total_duration - trim_end
+        volume_expr_parts.append(f"gte(t,{mute_from})")
+
+    if not volume_expr_parts:
+        return {"success": True, "message": "无需裁剪"}
+
+    # volume=0 when in mute regions, else 1
+    mute_condition = "+".join(volume_expr_parts)
+    volume_filter = f"volume='if({mute_condition},0,1)':eval=frame"
+
+    cmd = ["ffmpeg", "-y", "-i", src_path, "-af", volume_filter, "-c:v", "copy", tmp_path]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
-            # copy 模式失败时尝试重新编码
-            cmd2 = ["ffmpeg", "-y", "-i", src_path]
-            if trim_start > 0:
-                cmd2 += ["-ss", str(trim_start)]
-            if trim_end > 0 and total_duration > 0:
-                end_time = total_duration - trim_end
-                cmd2 += ["-to", str(end_time - trim_start)]
-            cmd2 += [tmp_path]
-            result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=120)
-            if result2.returncode != 0:
-                raise Exception(result2.stderr)
+            print(f"[trim] ffmpeg error: {result.stderr}")
+            raise Exception(result.stderr[-500:] if len(result.stderr) > 500 else result.stderr)
 
         # 替换原文件
         shutil.move(tmp_path, src_path)
