@@ -2,7 +2,9 @@
 
 FROM python:3.10-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's|deb.debian.org|repo.huaweicloud.com|g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's|security.debian.org|repo.huaweicloud.com|g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
     curl \
@@ -12,7 +14,9 @@ WORKDIR /app
 
 COPY backend/requirements.txt /app/backend/requirements.txt
 
-RUN pip install --upgrade pip && \
+RUN pip config set global.index-url https://repo.huaweicloud.com/repository/pypi/simple && \
+    pip config set global.trusted-host repo.huaweicloud.com && \
+    pip install --upgrade pip && \
     pip install --no-cache-dir -r /app/backend/requirements.txt 2>/dev/null || \
     pip install --no-cache-dir \
     fastapi uvicorn python-multipart \
