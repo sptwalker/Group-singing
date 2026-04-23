@@ -740,6 +740,7 @@ async function renderExport(container) {
         </div>
         <div id="expPlaybar"></div>
         <div id="expWavePanel"></div>
+        <div id="expMiniRecOps" class="exp-mini-rec-ops" style="display:none;"></div>
         <div id="expRecPanel"></div>`;
         document.getElementById('expSongSel').addEventListener('change', _expLoadSong);
         document.getElementById('expSynthBtn').addEventListener('click', _expStartSynth);
@@ -1241,16 +1242,178 @@ function _expRenderOverlay() {
             _expSelectSeg(parseInt(el.dataset.idx));
         });
     });
-    // 绑定迷你胶囊点击播放
+    // 绑定迷你胶囊点击 → 显示信息操作区
     ov.querySelectorAll('.mini-rec-capsule[data-rec-id]').forEach(el => {
         el.addEventListener('click', e => {
             e.stopPropagation();
+            const segIdx = parseInt(el.dataset.seg);
             const recId = el.dataset.recId;
-            _expPlayRecById(recId);
+            _expShowMiniRecOps(segIdx, recId);
         });
     });
     // 初始化迷你波形
     _expInitMiniWS();
+}
+
+// ---- 迷你录音信息操作区 ----
+let _expMiniOpsRecId = null; // 当前操作区对应的录音ID
+
+function _expShowMiniRecOps(segIdx, recId) {
+    const panel = document.getElementById('expMiniRecOps');
+    if (!panel) return;
+    // 再次点击同一个 → 关闭
+    if (_expMiniOpsRecId === recId) { _expHideMiniRecOps(); return; }
+    _expMiniOpsRecId = recId;
+    // 查找录音数据
+    const seg = _expSegs[segIdx];
+    if (!seg) { _expHideMiniRecOps(); return; }
+    const rec = (seg._recs || []).find(r => r.id === recId);
+    if (!rec) { _expHideMiniRecOps(); return; }
+
+    const pitchShift = rec._pitchShift || 0;
+    const gain = rec._gain || 0;
+    const reverb = rec._reverb || 0;
+    const fadeOut = rec._fadeOut || 0;
+    const startT = rec._startOffset != null ? rec._startOffset : seg.start_time;
+    const endT = rec._endOffset != null ? rec._endOffset : seg.end_time;
+
+    // 高亮当前胶囊
+    document.querySelectorAll('.mini-rec-capsule').forEach(el => el.classList.remove('mini-active'));
+    const capsule = document.querySelector(`.mini-rec-capsule[data-rec-id="${recId}"]`);
+    if (capsule) capsule.classList.add('mini-active');
+
+    panel.style.display = '';
+    panel.innerHTML = `
+    <div class="mini-ops-inner">
+        <div class="mini-ops-header">
+            <span class="mini-ops-name">${rec.user_name}</span>
+            <span class="mini-ops-seg">${seg.index}. ${seg.lyrics || ''}</span>
+            <button class="mini-ops-play" id="miniOpsPlay" title="播放">▶</button>
+            <button class="mini-ops-close" id="miniOpsClose" title="关闭">✕</button>
+        </div>
+        <div class="mini-ops-controls">
+            <div class="mini-ops-group">
+                <label>起始</label>
+                <input type="number" class="mini-ops-input" id="miniOpsStart" value="${startT.toFixed(2)}" step="0.1" min="0">
+            </div>
+            <div class="mini-ops-group">
+                <label>结束</label>
+                <input type="number" class="mini-ops-input" id="miniOpsEnd" value="${endT.toFixed(2)}" step="0.1" min="0">
+            </div>
+            <div class="mini-ops-sep"></div>
+            <div class="mini-ops-group">
+                <label>升降调</label>
+                <div class="mini-ops-pitch">
+                    <button class="btn btn-outline btn-xs" id="miniOpsPitchDown">-</button>
+                    <span id="miniOpsPitchVal">${pitchShift > 0 ? '+' + pitchShift : pitchShift}</span>
+                    <button class="btn btn-outline btn-xs" id="miniOpsPitchUp">+</button>
+                </div>
+            </div>
+            <div class="mini-ops-group">
+                <label>增益</label>
+                <input type="range" id="miniOpsGain" min="-20" max="20" value="${gain}" class="mini-ops-slider">
+                <span id="miniOpsGainVal">${gain > 0 ? '+' + gain : gain}dB</span>
+            </div>
+            <div class="mini-ops-group">
+                <label>混响</label>
+                <input type="range" id="miniOpsReverb" min="0" max="100" value="${reverb}" class="mini-ops-slider">
+                <span id="miniOpsReverbVal">${reverb}%</span>
+            </div>
+            <div class="mini-ops-group">
+                <label>渐弱</label>
+                <input type="range" id="miniOpsFadeOut" min="0" max="5000" step="100" value="${fadeOut}" class="mini-ops-slider">
+                <span id="miniOpsFadeOutVal">${fadeOut}ms</span>
+            </div>
+        </div>
+    </div>`;
+
+    // 绑定事件
+    _expBindMiniOpsEvents(segIdx, recId);
+}
+
+function _expBindMiniOpsEvents(segIdx, recId) {
+    const seg = _expSegs[segIdx];
+    const rec = (seg?._recs || []).find(r => r.id === recId);
+    if (!rec) return;
+
+    document.getElementById('miniOpsClose')?.addEventListener('click', _expHideMiniRecOps);
+    document.getElementById('miniOpsPlay')?.addEventListener('click', () => {
+        // 确保当前唱段被选中，然后播放
+        if (_expActiveSegIdx !== segIdx) _expSelectSeg(segIdx);
+        const recs = seg._recs || [];
+        const idx = recs.findIndex(r => r.id === recId);
+        if (idx >= 0) _expPlayRec(idx);
+    });
+
+    // 起止时间
+    document.getElementById('miniOpsStart')?.addEventListener('change', e => {
+        rec._startOffset = Math.max(0, parseFloat(e.target.value) || 0);
+    });
+    document.getElementById('miniOpsEnd')?.addEventListener('change', e => {
+        rec._endOffset = Math.max(0, parseFloat(e.target.value) || 0);
+    });
+
+    // 升降调
+    const updatePitch = (dir) => {
+        rec._pitchShift = Math.max(-12, Math.min(12, (rec._pitchShift || 0) + dir));
+        const el = document.getElementById('miniOpsPitchVal');
+        if (el) el.textContent = rec._pitchShift > 0 ? '+' + rec._pitchShift : String(rec._pitchShift);
+        // 同步底部面板
+        _expSyncBottomRecCtrl(segIdx, recId, rec);
+    };
+    document.getElementById('miniOpsPitchDown')?.addEventListener('click', () => updatePitch(-1));
+    document.getElementById('miniOpsPitchUp')?.addEventListener('click', () => updatePitch(1));
+
+    // 增益
+    document.getElementById('miniOpsGain')?.addEventListener('input', e => {
+        rec._gain = parseInt(e.target.value);
+        const el = document.getElementById('miniOpsGainVal');
+        if (el) el.textContent = (rec._gain > 0 ? '+' + rec._gain : rec._gain) + 'dB';
+        _expSyncBottomRecCtrl(segIdx, recId, rec);
+    });
+
+    // 混响
+    document.getElementById('miniOpsReverb')?.addEventListener('input', e => {
+        rec._reverb = parseInt(e.target.value);
+        const el = document.getElementById('miniOpsReverbVal');
+        if (el) el.textContent = rec._reverb + '%';
+        _expSyncBottomRecCtrl(segIdx, recId, rec);
+    });
+
+    // 渐弱
+    document.getElementById('miniOpsFadeOut')?.addEventListener('input', e => {
+        rec._fadeOut = parseInt(e.target.value);
+        const el = document.getElementById('miniOpsFadeOutVal');
+        if (el) el.textContent = rec._fadeOut + 'ms';
+    });
+}
+
+function _expSyncBottomRecCtrl(segIdx, recId, rec) {
+    // 如果底部面板正好显示同一唱段，同步控件值
+    if (_expActiveSegIdx !== segIdx) return;
+    const seg = _expSegs[segIdx];
+    const recs = seg?._recs || [];
+    const idx = recs.findIndex(r => r.id === recId);
+    if (idx < 0) return;
+    const pitchEl = document.getElementById(`expPitch${idx}`);
+    if (pitchEl) pitchEl.textContent = (rec._pitchShift || 0) > 0 ? '+' + rec._pitchShift : String(rec._pitchShift || 0);
+    const gainEl = document.getElementById(`expGain${idx}`);
+    const gainSlider = document.querySelector(`.rec-gain-slider[data-idx="${idx}"]`);
+    if (gainEl) gainEl.textContent = ((rec._gain || 0) > 0 ? '+' + rec._gain : (rec._gain || 0)) + 'dB';
+    if (gainSlider) gainSlider.value = rec._gain || 0;
+    const reverbEl = document.getElementById(`expReverb${idx}`);
+    const reverbSlider = document.querySelector(`.rec-reverb-slider[data-idx="${idx}"]`);
+    if (reverbEl) reverbEl.textContent = (rec._reverb || 0) + '%';
+    if (reverbSlider) reverbSlider.value = rec._reverb || 0;
+    // 实时更新音效
+    _expUpdateFxParams(idx, rec);
+}
+
+function _expHideMiniRecOps() {
+    _expMiniOpsRecId = null;
+    const panel = document.getElementById('expMiniRecOps');
+    if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+    document.querySelectorAll('.mini-rec-capsule').forEach(el => el.classList.remove('mini-active'));
 }
 
 function _expInitMiniWS() {
@@ -1275,6 +1438,7 @@ function _expInitMiniWS() {
 function _expSelectSeg(idx) {
     if (idx === _expActiveSegIdx) idx = -1; // toggle
     _expActiveSegIdx = idx;
+    _expHideMiniRecOps();
     // 更新覆盖层 active 状态
     document.querySelectorAll('.export-seg-block').forEach(el => {
         el.classList.toggle('active', parseInt(el.dataset.idx) === idx);

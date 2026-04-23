@@ -1359,8 +1359,8 @@ tbody tr:last-child td { border-bottom: none; }
 .export-wave-scroll::-webkit-scrollbar-track { background:#312e81; border-radius:0 0 8px 8px; }
 .export-wave-scroll::-webkit-scrollbar-thumb { background:#6366f1; border-radius:5px; }
 .export-wave-scroll::-webkit-scrollbar-thumb:hover { background:#818cf8; }
-.export-wave-host { position:relative; min-height:240px; }
-.export-overlay { position:absolute; top:0; left:0; right:0; bottom:0; pointer-events:none; z-index:2; }
+.export-wave-host { position:relative; min-height:240px; padding-top:24px; }
+.export-overlay { position:absolute; top:24px; left:0; right:0; bottom:0; pointer-events:none; z-index:2; }
 
 /* 时间标尺 */
 .export-timeline { position:relative; height:22px; background:rgba(255,255,255,.06); border-top:1px solid rgba(255,255,255,.1); user-select:none; }
@@ -1454,14 +1454,35 @@ tbody tr:last-child td { border-bottom: none; }
 /* 光标线 */
 .export-cursor-line { position:absolute; top:0; bottom:0; width:2px; background:#ef4444; z-index:10; pointer-events:none; transition:left .05s linear; }
 .export-cursor-line.dragging { transition:none; }
-.export-cursor-handle { position:absolute; top:-6px; left:50%; transform:translateX(-50%); width:14px; height:14px; border-radius:50%; background:#ef4444; border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,0.3); cursor:grab; pointer-events:all; z-index:11; }
-.export-cursor-handle:active { cursor:grabbing; transform:translateX(-50%) scale(1.2); }
+.export-cursor-handle { position:absolute; top:2px; left:50%; transform:translateX(-50%); width:16px; height:16px; background:#ef4444; border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,0.3); cursor:grab; pointer-events:all; z-index:11; clip-path:polygon(0 0, 100% 0, 50% 100%); border-radius:0; }
+.export-cursor-handle:active { cursor:grabbing; transform:translateX(-50%) scale(1.15); }
 .export-cursor-handle:hover { box-shadow:0 1px 8px rgba(239,68,68,0.5); }
 
 /* 波形区域点击定位 */
 .export-wave-host { cursor:crosshair; }
 
-/* 伴奏上传 */
+/* 迷你胶囊高亮 */
+.mini-rec-capsule.mini-active { background:#bfdbfe !important; box-shadow:0 0 0 2px #3b82f6, 0 1px 4px rgba(59,130,246,.4) !important; }
+
+/* 迷你录音信息操作区 */
+.exp-mini-rec-ops { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; margin-bottom:16px; overflow:hidden; }
+.mini-ops-inner { padding:10px 16px; }
+.mini-ops-header { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.mini-ops-name { font-weight:600; font-size:14px; color:var(--text); }
+.mini-ops-seg { font-size:12px; color:var(--text-secondary); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mini-ops-play { width:28px; height:28px; border-radius:50%; border:none; background:var(--primary); color:#fff; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.mini-ops-play:hover { background:#4338ca; }
+.mini-ops-close { width:28px; height:28px; border-radius:50%; border:1px solid var(--border); background:var(--bg); color:var(--text-secondary); font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.mini-ops-close:hover { background:#fee2e2; color:#dc2626; border-color:#fca5a5; }
+.mini-ops-controls { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.mini-ops-group { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); }
+.mini-ops-group label { font-weight:500; white-space:nowrap; min-width:36px; }
+.mini-ops-input { width:72px; padding:3px 6px; border:1px solid var(--border); border-radius:4px; font-size:12px; font-family:monospace; text-align:center; }
+.mini-ops-pitch { display:flex; align-items:center; gap:4px; }
+.mini-ops-pitch span { font-size:12px; font-weight:600; font-family:monospace; min-width:20px; text-align:center; color:var(--text); }
+.mini-ops-slider { width:80px; height:4px; accent-color:var(--primary); cursor:pointer; }
+.mini-ops-sep { width:1px; height:24px; background:var(--border); flex-shrink:0; }
+.btn-xs { padding:2px 6px; font-size:11px; min-width:22px; }
 .acc-upload-btn { position:relative; overflow:hidden; }
 .acc-upload-btn input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; font-size:0; }
 .acc-status { font-size:12px; padding:4px 10px; border-radius:12px; white-space:nowrap; }
