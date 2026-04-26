@@ -1,6 +1,6 @@
 # YouDoo Sing 开发记录
 
-> 最后更新: 2026-04-15
+> 最后更新: 2026-04-25（MySQL 持久化迁移）
 
 ## 一、项目概述
 
@@ -11,29 +11,43 @@ YouDoo Sing 是一个纯 Web 端多人群唱系统，支持歌曲上传、波形
 | 层 | 技术 |
 |---|---|
 | 前端 | 纯 HTML + CSS + 原生 JS（无框架），WaveSurfer.js 7 |
-| 后端 | Python FastAPI，单文件路由 `routes.py` (~1770行) |
-| 数据存储 | JSON 文件 `backend/data/db.json`（内存 dict + `_save_db()` 持久化） |
+| 后端 | Python FastAPI，单文件路由 `routes.py` (~3340行) |
+| 数据存储 | **MySQL 8.0（utf8mb4）+ SQLAlchemy 2.0 ORM**，连接信息走 `.env` |
 | 音频存储 | `backend/uploads/` 目录（录音 webm），`backend/finals/` 目录（合成成曲） |
 | 音频处理 | librosa + soundfile + scipy + numpy（合成引擎），ffmpeg（格式转换） |
 | 前端服务 | `python -m http.server 3000 --directory frontend/public` |
 | 后端服务 | `cd backend && python main.py`（uvicorn 0.0.0.0:8000） |
+| 数据库 | docker-compose 起 `db` 服务（MySQL 8.0），开发期直接连 `127.0.0.1:3306` |
 
-> 注意：`models/`, `schemas/`, `core/database.py` 等 SQLAlchemy 相关代码为早期遗留，**当前未使用**，实际数据全部走 JSON 文件。
+> 历史背景：早期版本使用 `backend/data/db.json` 内存 dict + `_save_db()` 文件持久化。2026-04-25 已切换到 MySQL（方案B：完整 ORM 重构），所有路由通过 `db: Session = Depends(get_db)` 注入会话；`db.json` 仅作为一次性迁移源保留。
 
 ## 三、项目文件结构
 
 ```
 youdoo-sing/
 ├── backend/
-│   ├── main.py                  # FastAPI 入口，CORS，include_router
+│   ├── main.py                  # FastAPI 入口，CORS，include_router，启动时调用 init_db()
+│   ├── .env                     # MYSQL_HOST/PORT/USER/PASSWORD/DB（不入库）
 │   ├── app/
-│   │   └── api/
-│   │       └── routes.py        # 全部 API 路由（~1770行），含 JSON DB 操作 + 合成引擎
+│   │   ├── api/
+│   │   │   └── routes.py        # 全部 API 路由（~3340行），全部走 SQLAlchemy ORM + 合成引擎
+│   │   ├── core/
+│   │   │   ├── config.py        # Pydantic Settings，加载 .env
+│   │   │   └── database.py      # engine / SessionLocal / Base / get_db / db_session / init_db
+│   │   └── models/              # SQLAlchemy ORM 模型（6 张表）
+│   │       ├── song.py          # Song (relationships: segments, free_tasks)
+│   │       ├── segment.py       # Segment + SegmentClaim（cascade delete-orphan）
+│   │       ├── recording.py     # Recording（segment_id 不加 FK，可指向 segments 或 free_tasks）
+│   │       ├── user.py          # User（wechat_openid/unionid 索引）
+│   │       ├── free_task.py     # FreeTask（task_type 列名映射为 "type"）
+│   │       └── final.py         # Final（song_id 不加 FK，保留歌曲删除后的成曲文件）
+│   ├── scripts/
+│   │   └── migrate_db_json_to_mysql.py  # 一次性迁移：db.json → MySQL（幂等，按 ID 跳过已存在）
 │   ├── data/
-│   │   └── db.json              # 运行时数据存储（songs, segments, claims, recordings, users, finals）
+│   │   └── db.json              # 历史数据快照，仅用于迁移；启动时不再读取
 │   ├── uploads/                 # 用户上传的录音文件（.webm）+ 伴奏文件
 │   ├── finals/                  # 合成成曲输出目录（.mp3/.wav + 元数据JSON + 录音备份）
-│   └── requirements.txt
+│   └── requirements.txt         # 已加 sqlalchemy + pymysql + pydantic-settings
 │
 ├── frontend/public/
 │   ├── admin.html               # 管理后台入口
@@ -60,17 +74,19 @@ youdoo-sing/
 
 ## 四、核心数据结构
 
-### db.json 顶层结构
-```json
-{
-  "songs": { "<song_id>": { ... } },
-  "segments": { "<seg_id>": { ... } },
-  "claims": { "<claim_id>": { ... } },
-  "recordings": { "<rec_id>": { ... } },
-  "users": { "<user_id>": { ... } },
-  "finals": { "<final_id>": { ... } }
-}
-```
+### MySQL 表结构（SQLAlchemy ORM）
+
+| 表 | 模型 | 主键 | 关键关系 |
+|---|---|---|---|
+| `songs` | Song | id (String 32) | `segments` 1:N（cascade delete-orphan, lazy="selectin", order_by index）<br>`free_tasks` 1:N（cascade delete-orphan） |
+| `segments` | Segment | id (String 32) | `song_id` → songs.id (FK)<br>`claims` 1:N（cascade delete-orphan） |
+| `segment_claims` | SegmentClaim | id (String 32) | `segment_id` → segments.id (FK) |
+| `recordings` | Recording | id (String 32) | `segment_id`（**无 FK**：可指向 segments.id 或 free_tasks.id） |
+| `users` | User | id (String 32) | wechat_openid / wechat_unionid 各自加索引 |
+| `free_tasks` | FreeTask | id (String 32) | `song_id` → songs.id (FK)；ORM 属性 `task_type` 映射数据库列 `type` |
+| `finals` | Final | id (String 32) | `song_id` **无 FK**（删除歌曲后成曲文件仍可保留） |
+
+> 表结构由 `init_db()` 在 FastAPI startup 时通过 `Base.metadata.create_all(bind=engine)` 自动创建；当前不使用 Alembic。
 
 ### Segment 字段
 ```json
@@ -390,6 +406,13 @@ pip install -r requirements.txt
 | scipy | >=1.12.0 | 高通滤波（Butterworth） |
 | mutagen | >=1.47.0 | 音频元数据读取（时长检测） |
 
+数据库依赖：
+| 包 | 用途 |
+|---|---|
+| SQLAlchemy >=2.0 | ORM + 连接池 |
+| PyMySQL | MySQL 驱动（`mysql+pymysql://...`） |
+| pydantic-settings | 加载 `.env` 配置 |
+
 ### 系统依赖
 | 工具 | 用途 |
 |---|---|
@@ -406,27 +429,57 @@ ffmpeg -version
 
 ## 十五、启动方式
 
+### 1) 启动 MySQL（开发期用 docker-compose）
+```bash
+cd youdoo-sing
+docker-compose up -d db        # 启动 MySQL 8.0（端口 3306）
+```
+
+### 2) 配置 `.env`（已有则跳过）
+`backend/.env` 包含：
+```
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=youdoo
+MYSQL_PASSWORD=youdoo123
+MYSQL_DB=youdoo_sing
+```
+
+### 3) 一次性迁移历史数据（仅首次）
+```bash
+cd youdoo-sing/backend
+python -m scripts.migrate_db_json_to_mysql
+```
+脚本读取 `data/db.json`，按 ID 幂等导入；末尾打印 `inserted` / `skipped` 统计。
+
+### 4) 启动后端 / 前端
 ```bash
 # 后端（端口 8000）
 cd youdoo-sing/backend
 python -m venv venv
 venv\Scripts\activate        # Windows
 pip install -r requirements.txt
-python main.py
+python main.py               # FastAPI startup 会调用 init_db() 自动建表
 
 # 前端（端口 3000）
 cd youdoo-sing
 python -m http.server 3000 --directory frontend/public
 ```
 
+启动日志包含 `[startup] MySQL schema ready` 表示 ORM 元数据已同步至库。
+
 ## 十六、已知注意事项
 
-1. **Segment ID 重建问题**：`PUT /segments/batch` 会用 `uuid.uuid4().hex[:6]` 重新生成所有 ID，已通过孤儿录音检测+确认删除机制解决
-2. **db.json 并发**：当前无锁机制，单用户开发环境使用
-3. **遗留代码**：`models/`, `schemas/`, `core/database.py` 为 SQLAlchemy 遗留，未使用
-4. **前端缓存**：HTML 中 JS/CSS 引用带 `?v=` 版本号参数，修改后需更新
-5. **admin.html 脚本加载顺序**：`admin-core.js` → `admin-modules.js` → `admin-editor.js` → `admin-editor2.js` → `admin-tasks.js`
-6. **合成任务状态**：`SYNTH_TASKS` 存储在内存中，服务器重启后丢失（合成结果已持久化到 `FINALS_DB`）
-7. **ffmpeg 依赖**：合成引擎需要 ffmpeg 在系统 PATH 中，用于 webm→wav 和 wav→mp3 转换
-8. **合成线程安全**：同一歌曲同时只允许一个合成任务，通过 `SYNTH_TASKS` 状态检查实现
+1. **Segment ID 重建问题**：`PUT /segments/batch` 会用 `uuid.uuid4().hex[:6]` 重新生成所有 ID，已通过孤儿录音检测+确认删除机制解决；批量替换时由 `_replace_segments_with_dicts` 先 `db.delete()` + flush 再插入新行，避免 PK 冲突
+2. **MySQL 并发**：FastAPI 每个请求一个 Session（`Depends(get_db)`），并发安全由数据库事务保证
+3. **前端缓存**：HTML 中 JS/CSS 引用带 `?v=` 版本号参数，修改后需更新
+4. **admin.html 脚本加载顺序**：`admin-core.js` → `admin-modules.js` → `admin-editor.js` → `admin-editor2.js` → `admin-tasks.js`
+5. **合成任务状态**：`SYNTH_TASKS` 存储在内存中，服务器重启后丢失（合成结果已持久化到 `finals` 表）
+6. **ffmpeg 依赖**：合成引擎需要 ffmpeg 在系统 PATH 中，用于 webm→wav 和 wav→mp3 转换
+7. **合成线程安全**：同一歌曲同时只允许一个合成任务，通过 `SYNTH_TASKS` 状态检查实现
+8. **合成线程 + ORM**：Session 不可跨线程使用。`admin_start_synthesis` 必须先把 Song / Segment / Recording 通过 `.to_dict()` 物化为 plain dict 再传给 `threading.Thread`；后台 `_run_synthesis` 在写 Final 时用 `with db_session() as db_bg:` 重新开会话
 9. **finals 目录结构**：每次合成生成音频文件 + 元数据 JSON + 录音备份目录，删除成曲时同步清理所有关联文件
+10. **Recording.segment_id 不加 FK**：因为该字段在不同流程下既可能引用 `segments.id`，也可能引用 `free_tasks.id`，加 FK 会破坏自由任务录音
+11. **Final.song_id 不加 FK**：删除歌曲后保留历史成曲音频，`admin_delete_song` 主动清理 Recording 与 Final 行
+12. **Cascade 删除**：`Song.segments` / `Segment.claims` / `Song.free_tasks` 都配置了 `cascade="all, delete-orphan"`；删除 Song 时这些子表会自动清理，但 `recordings` 与 `finals` 仍需手动处理（无 FK）
+13. **db.json 已退役**：启动时不再读取，相关 `_save_db()` / `_load_db()` 已全部删除；保留 `data/db.json` 仅供迁移脚本使用

@@ -10,15 +10,13 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # 持久化数据卷（数据库、上传文件、合成成曲）
       - youdoo-data:/app/backend/data
       - youdoo-uploads:/app/backend/uploads
       - youdoo-finals:/app/backend/finals
-      # 挂载本地音乐库（只读）
       - ../music:/music:ro
     environment:
       - DEBUG=false
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/youdoo_sing
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER:-youdoo}:${MYSQL_PASSWORD:-youdoo}@db:3306/${MYSQL_DB:-youdoo_sing}?charset=utf8mb4
       - REDIS_URL=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
@@ -36,20 +34,27 @@ services:
       start_period: 10s
 
   db:
-    image: postgres:15-alpine
+    image: mysql:8.0
     container_name: youdoo-db
     restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: youdoo_sing
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DB:-youdoo_sing}
+      MYSQL_USER: ${MYSQL_USER:-youdoo}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-youdoo}
+    ports:
+      - "3306:3306"
     volumes:
-      - youdoo-pgdata:/var/lib/postgresql/data
+      - youdoo-mysql:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   redis:
     image: redis:7-alpine
@@ -70,7 +75,7 @@ volumes:
     driver: local
   youdoo-finals:
     driver: local
-  youdoo-pgdata:
+  youdoo-mysql:
     driver: local
   youdoo-redis:
     driver: local

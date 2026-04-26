@@ -3,3 +3,21 @@ server.log
 __pycache__/
 *.pyc
 .env
+
+# local Claude Code settings
+.claude/
+
+# downloaded tools / large binaries
+*.msi
+
+# local-only Dockerfile（aliyun 镜像源构建，不进远程）
+youdoo-sing/Dockerfile.aliyun
+
+# test fixtures (audio not for distribution)
+/测试音乐/
+
+# transient synthesis output (DB owns the canonical reference)
+youdoo-sing/backend/finals/final_*.mp3
+youdoo-sing/backend/finals/final_*.wav
+youdoo-sing/backend/finals/meta_*.json
+youdoo-sing/backend/finals/recs_*/

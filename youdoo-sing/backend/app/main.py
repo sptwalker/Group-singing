@@ -1,8 +1,18 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router as legacy_api_router
+from app.core.database import init_db
 
-app = FastAPI(title="拼歌系统", version="1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    print("[startup] MySQL schema ready")
+    yield
+
+
+app = FastAPI(title="拼歌系统", version="1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,9 +24,11 @@ app.add_middleware(
 
 app.include_router(legacy_api_router)
 
+
 @app.get("/")
 def root():
     return {"message": "拼歌系统运行正常"}
+
 
 @app.get("/health")
 def health():
