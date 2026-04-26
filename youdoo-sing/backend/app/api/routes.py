@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Query, Body, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Query, Body, Request, Depends
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from typing import Optional, List
 import uuid
@@ -15,6 +15,12 @@ from datetime import datetime
 from difflib import SequenceMatcher
 import httpx
 from urllib.parse import urlencode, urlsplit
+from contextlib import contextmanager
+
+from sqlalchemy.orm import Session
+from sqlalchemy import select, func as sql_func
+from app.core.database import get_db, SessionLocal
+from app.models import Song, Segment, SegmentClaim, Recording, User, FreeTask, Final
 
 # OpenAI API 配置（用于 DeepSeek 等兼容接口）
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -25,15 +31,6 @@ WECHAT_APP_SECRET = os.environ.get("WECHAT_APP_SECRET", "").strip()
 WECHAT_OAUTH_REDIRECT_URI = os.environ.get("WECHAT_OAUTH_REDIRECT_URI", "").strip()
 
 router = APIRouter(prefix="/api", tags=["api"])
-
-# ============ 内存数据存储 + JSON 文件持久化 ============
-
-SONGS_DB = {}
-SEGMENTS_DB = {}
-CLAIMS_DB = {}
-RECORDINGS_DB = {}
-USERS_DB = {}
-FINALS_DB = {}
 
 # ============ 管理员配置 ============
 ADMIN_ACCOUNTS = {
@@ -57,54 +54,45 @@ if os.path.exists(MUSIC_DIR):
     print(f"[DEBUG] Music files: {os.listdir(MUSIC_DIR)}")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-_DB_FILE = os.path.join(DATA_DIR, "db.json")
 
-def _save_db():
-    """将所有内存数据持久化到 JSON 文件"""
-    data = {
-        "songs": SONGS_DB,
-        "segments": SEGMENTS_DB,
-        "claims": CLAIMS_DB,
-        "recordings": RECORDINGS_DB,
-        "users": USERS_DB,
-        "finals": FINALS_DB,
-    }
-    tmp = _DB_FILE + ".tmp"
+@contextmanager
+def db_session():
+    """供后台线程使用：with db_session() as db: ..."""
+    db = SessionLocal()
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        if os.path.exists(_DB_FILE):
-            os.replace(tmp, _DB_FILE)
-        else:
-            os.rename(tmp, _DB_FILE)
-        print(f"[persist] saved {len(SONGS_DB)} songs, {len(SEGMENTS_DB)} segments, {len(RECORDINGS_DB)} recordings")
-    except Exception as e:
-        print(f"[persist] save failed: {e}")
+        yield db
+    finally:
+        db.close()
 
-def _load_db() -> bool:
-    """从 JSON 文件恢复数据，成功返回 True"""
-    global SONGS_DB, SEGMENTS_DB, CLAIMS_DB, RECORDINGS_DB, USERS_DB, FINALS_DB
-    if not os.path.exists(_DB_FILE):
-        return False
-    try:
-        with open(_DB_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        SONGS_DB.update(data.get("songs", {}))
-        SEGMENTS_DB.update(data.get("segments", {}))
-        CLAIMS_DB.update(data.get("claims", {}))
-        RECORDINGS_DB.update(data.get("recordings", {}))
-        USERS_DB.update(data.get("users", {}))
-        FINALS_DB.update(data.get("finals", {}))
-        # 修复引用：让 SONGS_DB 中的 segment 指向 SEGMENTS_DB 的同一对象
-        for song in SONGS_DB.values():
-            for i, seg in enumerate(song.get("segments", [])):
-                if seg["id"] in SEGMENTS_DB:
-                    song["segments"][i] = SEGMENTS_DB[seg["id"]]
-        print(f"[persist] loaded {len(SONGS_DB)} songs, {len(SEGMENTS_DB)} segments, {len(RECORDINGS_DB)} recordings from {_DB_FILE}")
-        return bool(SONGS_DB)
-    except Exception as e:
-        print(f"[persist] load failed: {e}")
-        return False
+
+def _seg_id_exists(db: Session, seg_id: str) -> bool:
+    return db.get(Segment, seg_id) is not None
+
+
+def _apply_seg_dict_to_orm(orm_seg: Segment, d: dict) -> None:
+    """把 dict 形式的 segment 字段应用回 ORM 行（仅写允许变更字段）"""
+    for key in ("start_time", "end_time", "lyrics", "difficulty", "is_chorus", "status",
+                "claim_count", "submit_count", "index"):
+        if key in d:
+            setattr(orm_seg, key, d[key])
+
+
+def _new_segment_orm_from_dict(d: dict) -> Segment:
+    """从 dict 创建 Segment ORM 实例（用于 _resegment_by_lrc / _split_and_analyze 的产物入库）"""
+    return Segment(
+        id=d["id"],
+        song_id=d["song_id"],
+        index=d.get("index", 0),
+        start_time=d.get("start_time", 0.0),
+        end_time=d.get("end_time", 0.0),
+        lyrics=d.get("lyrics", ""),
+        difficulty=d.get("difficulty", "normal"),
+        is_chorus=bool(d.get("is_chorus", False)),
+        status=d.get("status", "unassigned"),
+        claim_count=d.get("claim_count", 0),
+        submit_count=d.get("submit_count", 0),
+        created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
 
 
 def _get_audio_duration(filepath: str) -> float:
@@ -126,7 +114,7 @@ def _get_audio_duration(filepath: str) -> float:
         result = subprocess.run(
             ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", filepath],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30
         )
         if result.returncode == 0 and result.stdout.strip():
             dur = round(float(result.stdout.strip()), 2)
@@ -981,27 +969,28 @@ def _split_and_analyze(song_id: str, filepath: str, duration: float, full_lyrics
 
     # ---- 第二步：构建唱段 ----
     segments = []
-    for i in range(len(split_points) - 1):
-        seg_id = f"{song_id}-{i+1:02d}"
-        while seg_id in SEGMENTS_DB:
-            seg_id = f"{song_id}-{uuid.uuid4().hex[:4]}"
-        start_t = split_points[i]
-        end_t = split_points[i + 1]
-        seg = {
-            "id": seg_id,
-            "song_id": song_id,
-            "index": i + 1,
-            "start_time": start_t,
-            "end_time": end_t,
-            "lyrics": "",
-            "difficulty": "normal",
-            "is_chorus": False,
-            "status": "unassigned",
-            "claim_count": 0,
-            "submit_count": 0,
-            "claims": [],
-        }
-        segments.append(seg)
+    with db_session() as _db:
+        for i in range(len(split_points) - 1):
+            seg_id = f"{song_id}-{i+1:02d}"
+            while _seg_id_exists(_db, seg_id):
+                seg_id = f"{song_id}-{uuid.uuid4().hex[:4]}"
+            start_t = split_points[i]
+            end_t = split_points[i + 1]
+            seg = {
+                "id": seg_id,
+                "song_id": song_id,
+                "index": i + 1,
+                "start_time": start_t,
+                "end_time": end_t,
+                "lyrics": "",
+                "difficulty": "normal",
+                "is_chorus": False,
+                "status": "unassigned",
+                "claim_count": 0,
+                "submit_count": 0,
+                "claims": [],
+            }
+            segments.append(seg)
 
     print(f"[split] {len(segments)} segments created")
 
@@ -1062,21 +1051,15 @@ def _split_and_analyze(song_id: str, filepath: str, duration: float, full_lyrics
         for seg in segments:
             seg["difficulty"] = _estimate_difficulty("", seg["start_time"], seg["end_time"], False)
 
-    # 注册到数据库
-    for seg in segments:
-        SEGMENTS_DB[seg["id"]] = seg
-
+    # 注意：本函数仅产出 dict 列表；调用方负责把 segments 持久化为 ORM 行
     return segments, has_lyrics
 
 
 
 
 
-# ============ 初始化数据：从文件加载 ============
-if not _load_db():
-    print("[persist] no saved data found, starting with empty database")
-else:
-    print("[persist] data restored from disk")
+# ============ 初始化数据：MySQL 由 main.py 启动时 init_db() 创建表，无需此处加载 ============
+print("[persist] using MySQL via SQLAlchemy ORM (no file persistence)")
 
 # ============ 用户接口 ============
 
@@ -1114,18 +1097,17 @@ def _sanitize_login_target(target: Optional[str], default: str = "task.html") ->
     return safe
 
 
-def _find_wechat_user(openid: str, unionid: str = ""):
+def _find_wechat_user(db: Session, openid: str, unionid: str = "") -> Optional[User]:
     if unionid:
-        for user in USERS_DB.values():
-            if user.get("wechat_unionid") == unionid:
-                return user
-    for user in USERS_DB.values():
-        if user.get("wechat_openid") == openid:
-            return user
+        u = db.query(User).filter(User.wechat_unionid == unionid).first()
+        if u:
+            return u
+    if openid:
+        return db.query(User).filter(User.wechat_openid == openid).first()
     return None
 
 
-def _upsert_wechat_user(token_data: dict, profile_data: dict) -> dict:
+def _upsert_wechat_user(db: Session, token_data: dict, profile_data: dict) -> dict:
     openid = (profile_data.get("openid") or token_data.get("openid") or "").strip()
     unionid = (profile_data.get("unionid") or token_data.get("unionid") or "").strip()
     if not openid:
@@ -1136,23 +1118,37 @@ def _upsert_wechat_user(token_data: dict, profile_data: dict) -> dict:
     if not avatar:
         avatar = f"https://api.dicebear.com/7.x/fun-emoji/svg?seed={nickname}"
 
-    existing_user = _find_wechat_user(openid, unionid)
-    user_id = existing_user["id"] if existing_user else f"wx_{hashlib.sha256((unionid or openid).encode('utf-8')).hexdigest()[:12]}"
+    existing_user = _find_wechat_user(db, openid, unionid)
+    user_id = existing_user.id if existing_user else f"wx_{hashlib.sha256((unionid or openid).encode('utf-8')).hexdigest()[:12]}"
     now = datetime.utcnow().isoformat()
 
-    user = existing_user.copy() if existing_user else {"id": user_id, "created_at": now}
-    user.update({
-        "id": user_id,
-        "nickname": nickname,
-        "avatar": avatar,
-        "auth_provider": "wechat",
-        "wechat_openid": openid,
-        "wechat_unionid": unionid,
-        "wechat_scope": token_data.get("scope", "snsapi_userinfo"),
-        "last_login_at": now,
-    })
-    USERS_DB[user_id] = user
-    return user
+    if existing_user:
+        existing_user.nickname = nickname
+        existing_user.avatar = avatar
+        existing_user.auth_provider = "wechat"
+        existing_user.wechat_openid = openid
+        existing_user.wechat_unionid = unionid
+        existing_user.wechat_scope = token_data.get("scope", "snsapi_userinfo")
+        existing_user.last_login_at = now
+        db.commit()
+        db.refresh(existing_user)
+        return existing_user.to_dict()
+    else:
+        new_user = User(
+            id=user_id,
+            nickname=nickname,
+            avatar=avatar,
+            auth_provider="wechat",
+            wechat_openid=openid,
+            wechat_unionid=unionid,
+            wechat_scope=token_data.get("scope", "snsapi_userinfo"),
+            created_at=now,
+            last_login_at=now,
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return new_user.to_dict()
 
 
 def _get_wechat_callback_url(request: Request) -> str:
@@ -1366,8 +1362,8 @@ async def wechat_login_callback(
             except Exception as profile_error:
                 print(f"[wechat] userinfo fallback: {profile_error}")
 
-        user = _upsert_wechat_user(token_data, profile_data)
-        _save_db()
+        with db_session() as db:
+            user = _upsert_wechat_user(db, token_data, profile_data)
         return _wechat_callback_response(safe_target, user=user, json_mode=json_mode)
     except Exception as exc:
         print(f"[wechat] login callback failed: {exc}")
@@ -1380,194 +1376,205 @@ async def wechat_login_callback(
 
 
 @router.post("/user/login")
-async def user_login(nickname: str = Form(...)):
-    """模拟微信登录"""
+async def user_login(nickname: str = Form(...), db: Session = Depends(get_db)):
+    """模拟登录：直接创建一个随机 ID 的本地用户"""
     user_id = str(uuid.uuid4())[:8]
-    user = {
-        "id": user_id,
-        "nickname": nickname,
-        "avatar": f"https://api.dicebear.com/7.x/fun-emoji/svg?seed={nickname}",
-        "auth_provider": "mock",
-    }
-    USERS_DB[user_id] = user
-    _save_db()
-    return {"success": True, "data": user}
+    avatar = f"https://api.dicebear.com/7.x/fun-emoji/svg?seed={nickname}"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    user = User(
+        id=user_id,
+        nickname=nickname,
+        avatar=avatar,
+        auth_provider="mock",
+        created_at=now,
+        last_login_at=now,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"success": True, "data": user.to_dict()}
 
 
 # ============ 歌曲接口 ============
 
-def _calc_completion(song):
-    """动态计算完成度：有已提交录音的唱段 / 总唱段数"""
-    segs = song.get("segments", [])
+def _calc_completion_orm(db: Session, song: Song) -> float:
+    """完成度 = (已 completed 的段 + 有提交录音的段) / 总段数"""
+    segs = song.segments
     if not segs:
         return 0.0
-    # 收集所有已提交录音的 segment_id
-    submitted_seg_ids = set()
-    for r in RECORDINGS_DB.values():
-        if r.get("song_id") == song["id"] and r.get("submitted"):
-            submitted_seg_ids.add(r["segment_id"])
-    # 已完成（管理员标记）或有已提交录音的段都算
-    done = sum(1 for s in segs if s["status"] == "completed" or s["id"] in submitted_seg_ids)
+    seg_ids = [s.id for s in segs]
+    submitted_seg_ids = {
+        r.segment_id for r in db.query(Recording.segment_id)
+        .filter(Recording.song_id == song.id, Recording.submitted == True,
+                Recording.segment_id.in_(seg_ids)).all()
+    }
+    done = sum(1 for s in segs if s.status == "completed" or s.id in submitted_seg_ids)
     return round(done / len(segs) * 100, 1)
 
-def _calc_participant_count(song):
-    """动态计算参与人数"""
-    user_ids = set()
-    for r in RECORDINGS_DB.values():
-        if r.get("song_id") == song["id"] and r.get("submitted"):
-            user_ids.add(r["user_id"])
-    return len(user_ids)
+
+def _calc_participant_count_orm(db: Session, song_id: str) -> int:
+    rows = db.query(Recording.user_id).filter(
+        Recording.song_id == song_id, Recording.submitted == True
+    ).distinct().all()
+    return len(rows)
+
+
+def _published_final_brief(db: Session, song_id: str, full: bool = False) -> Optional[dict]:
+    f = db.query(Final).filter(Final.song_id == song_id, Final.published == True).first()
+    if not f:
+        return None
+    brief = {"id": f.id, "audio_url": f.audio_url or "", "duration": f.duration or 0}
+    if full:
+        brief.update({
+            "song_title": f.song_title or "",
+            "song_artist": f.song_artist or "",
+            "track_count": f.track_count,
+            "segment_count": f.segment_count,
+            "created_at": f.created_at or "",
+        })
+    return brief
+
 
 @router.get("/songs")
-async def get_songs():
-    """获取所有歌曲列表（仅返回已发布任务的歌曲）"""
+async def get_songs(db: Session = Depends(get_db)):
+    """获取所有已发布任务的歌曲"""
+    songs_orm = db.query(Song).filter(Song.task_published == True).all()
     songs = []
-    for s in SONGS_DB.values():
-        # 只返回已发布任务的歌曲
-        if not s.get("task_published"):
-            continue
-        # 检查是否有已发布的成曲
-        published_final = None
-        for f in FINALS_DB.values():
-            if f.get("song_id") == s["id"] and f.get("published"):
-                published_final = {
-                    "id": f["id"],
-                    "audio_url": f["audio_url"],
-                    "duration": f.get("duration", 0),
-                }
-                break
+    for s in songs_orm:
         songs.append({
-            "id": s["id"],
-            "title": s["title"],
-            "artist": s["artist"],
-            "duration": s["duration"],
-            "audio_url": s["audio_url"],
-            "segment_count": s["segment_count"],
-            "participant_count": _calc_participant_count(s),
-            "completion": _calc_completion(s),
-            "published_final": published_final,
+            "id": s.id,
+            "title": s.title,
+            "artist": s.artist or "",
+            "duration": s.duration,
+            "audio_url": s.audio_url,
+            "segment_count": s.segment_count,
+            "participant_count": _calc_participant_count_orm(db, s.id),
+            "completion": _calc_completion_orm(db, s),
+            "published_final": _published_final_brief(db, s.id, full=False),
         })
     return {"success": True, "data": songs}
 
 
 @router.get("/songs/{song_id}")
-async def get_song(song_id: str):
+async def get_song(song_id: str, db: Session = Depends(get_db)):
     """获取歌曲详情（含唱段）"""
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
-    # 附加已发布成曲信息
-    published_final = None
-    for f in FINALS_DB.values():
-        if f.get("song_id") == song_id and f.get("published"):
-            published_final = {
-                "id": f["id"],
-                "audio_url": f["audio_url"],
-                "duration": f.get("duration", 0),
-                "song_title": f.get("song_title", ""),
-                "song_artist": f.get("song_artist", ""),
-                "track_count": f.get("track_count", 0),
-                "segment_count": f.get("segment_count", 0),
-                "created_at": f.get("created_at", ""),
-            }
-            break
-    data = dict(song)
-    data["published_final"] = published_final
-    data["completion"] = _calc_completion(song)
-    data["participant_count"] = _calc_participant_count(song)
+    data = song.to_dict(include_segments=True)
+    data["published_final"] = _published_final_brief(db, song_id, full=True)
+    data["completion"] = _calc_completion_orm(db, song)
+    data["participant_count"] = _calc_participant_count_orm(db, song_id)
     return {"success": True, "data": data}
 
 
 # ============ 唱段接口 ============
 
 @router.get("/songs/{song_id}/segments")
-async def get_segments(song_id: str):
+async def get_segments(song_id: str, db: Session = Depends(get_db)):
     """获取歌曲所有唱段"""
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
-    return {"success": True, "data": song["segments"]}
+    return {"success": True, "data": [s.to_dict() for s in song.segments]}
 
 
 @router.post("/segments/{segment_id}/claim")
-async def claim_segment(segment_id: str, user_id: str = Form(...), user_name: str = Form(...)):
+async def claim_segment(
+    segment_id: str,
+    user_id: str = Form(...),
+    user_name: str = Form(...),
+    db: Session = Depends(get_db),
+):
     """认领唱段"""
-    seg = SEGMENTS_DB.get(segment_id)
+    seg = db.get(Segment, segment_id)
     if not seg:
         raise HTTPException(status_code=404, detail="唱段不存在")
-    if seg["status"] == "completed":
+    if seg.status == "completed":
         raise HTTPException(status_code=400, detail="该唱段已完成")
 
     # 检查是否已认领
-    for c in seg["claims"]:
-        if c["user_id"] == user_id:
-            return {"success": True, "data": seg, "message": "您已认领该唱段"}
+    for c in seg.claims:
+        if c.user_id == user_id:
+            return {"success": True, "data": seg.to_dict(), "message": "您已认领该唱段"}
 
-    claim_id = str(uuid.uuid4())[:8]
-    claim = {
-        "id": claim_id,
-        "segment_id": segment_id,
-        "user_id": user_id,
-        "user_name": user_name,
-        "status": "claimed",
-    }
-    seg["claims"].append(claim)
-    seg["claim_count"] = len(seg["claims"])
-    if seg["status"] == "unassigned":
-        seg["status"] = "claimed"
-    CLAIMS_DB[claim_id] = claim
+    claim = SegmentClaim(
+        id=str(uuid.uuid4())[:8],
+        segment_id=segment_id,
+        user_id=user_id,
+        user_name=user_name,
+        status="claimed",
+        created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    db.add(claim)
+    db.flush()
+    db.refresh(seg)
+    seg.claim_count = len(seg.claims)
+    if seg.status == "unassigned":
+        seg.status = "claimed"
 
-    # 更新参与人数
-    song = SONGS_DB.get(seg["song_id"])
+    # 更新参与人数（按所有段的 claim user 数）
+    song = db.get(Song, seg.song_id)
     if song:
-        all_users = set()
-        for s in song["segments"]:
-            for c in s["claims"]:
-                all_users.add(c["user_id"])
-        song["participant_count"] = len(all_users)
+        seg_ids = [s.id for s in song.segments]
+        if seg_ids:
+            user_count = db.query(SegmentClaim.user_id).filter(
+                SegmentClaim.segment_id.in_(seg_ids)
+            ).distinct().count()
+            song.participant_count = user_count
 
-    _save_db()
-    return {"success": True, "data": seg}
+    db.commit()
+    db.refresh(seg)
+    return {"success": True, "data": seg.to_dict()}
 
 
 @router.post("/segments/random-claim")
-async def random_claim(song_id: str = Form(...), user_id: str = Form(...), user_name: str = Form(...)):
+async def random_claim(
+    song_id: str = Form(...),
+    user_id: str = Form(...),
+    user_name: str = Form(...),
+    db: Session = Depends(get_db),
+):
     """随机认领一个可唱段"""
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
 
     import random
-    available = [s for s in song["segments"] if s["status"] != "completed"]
-    # 优先选未被当前用户认领的
-    unclaimed_by_user = [s for s in available if not any(c["user_id"] == user_id for c in s["claims"])]
+    available = [s for s in song.segments if s.status != "completed"]
+    unclaimed_by_user = [s for s in available if not any(c.user_id == user_id for c in s.claims)]
     pool = unclaimed_by_user if unclaimed_by_user else available
 
     if not pool:
         raise HTTPException(status_code=400, detail="没有可认领的唱段了")
 
     seg = random.choice(pool)
-    claim_id = str(uuid.uuid4())[:8]
-    claim = {
-        "id": claim_id,
-        "segment_id": seg["id"],
-        "user_id": user_id,
-        "user_name": user_name,
-        "status": "claimed",
-    }
-    if not any(c["user_id"] == user_id for c in seg["claims"]):
-        seg["claims"].append(claim)
-        seg["claim_count"] = len(seg["claims"])
-    if seg["status"] == "unassigned":
-        seg["status"] = "claimed"
-    CLAIMS_DB[claim_id] = claim
+    if not any(c.user_id == user_id for c in seg.claims):
+        claim = SegmentClaim(
+            id=str(uuid.uuid4())[:8],
+            segment_id=seg.id,
+            user_id=user_id,
+            user_name=user_name,
+            status="claimed",
+            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        db.add(claim)
+        db.flush()
+        db.refresh(seg)
+        seg.claim_count = len(seg.claims)
+    if seg.status == "unassigned":
+        seg.status = "claimed"
 
-    song["participant_count"] = len(set(
-        c["user_id"] for s in song["segments"] for c in s["claims"]
-    ))
+    seg_ids = [s.id for s in song.segments]
+    if seg_ids:
+        user_count = db.query(SegmentClaim.user_id).filter(
+            SegmentClaim.segment_id.in_(seg_ids)
+        ).distinct().count()
+        song.participant_count = user_count
 
-    _save_db()
-    return {"success": True, "data": seg}
+    db.commit()
+    db.refresh(seg)
+    return {"success": True, "data": seg.to_dict()}
 
 
 # ============ 录音接口 ============
@@ -1582,6 +1589,7 @@ async def upload_recording(
     score_detail: str = Form(""),
     user_avatar: str = Form(""),
     audio: UploadFile = File(...),
+    db: Session = Depends(get_db),
 ):
     """上传录音"""
     rec_id = str(uuid.uuid4())[:8]
@@ -1592,7 +1600,6 @@ async def upload_recording(
     with open(filepath, "wb") as f:
         f.write(content)
 
-    # 解析多维度评分
     parsed_detail = None
     if score_detail:
         try:
@@ -1600,155 +1607,162 @@ async def upload_recording(
         except Exception:
             pass
 
-    # 头像：优先用传入的，否则用用户库中的，最后用 DiceBear 生成
     avatar = user_avatar or ""
     if not avatar:
-        u = USERS_DB.get(user_id)
+        u = db.get(User, user_id)
         if u:
-            avatar = u.get("avatar", "")
+            avatar = u.avatar or ""
     if not avatar:
         avatar = f"https://api.dicebear.com/7.x/fun-emoji/svg?seed={user_name}"
 
-    recording = {
-        "id": rec_id,
-        "segment_id": segment_id,
-        "song_id": song_id,
-        "user_id": user_id,
-        "user_name": user_name,
-        "user_avatar": avatar,
-        "audio_url": f"/api/uploads/{filename}",
-        "score": score,
-        "score_detail": parsed_detail,
-        "likes": 0,
-        "submitted": False,
-        "selected": False,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    RECORDINGS_DB[rec_id] = recording
-    _save_db()
-    return {"success": True, "data": recording}
+    rec = Recording(
+        id=rec_id,
+        segment_id=segment_id,
+        song_id=song_id,
+        user_id=user_id,
+        user_name=user_name,
+        user_avatar=avatar,
+        audio_url=f"/api/uploads/{filename}",
+        score=score,
+        score_detail=parsed_detail,
+        likes=0,
+        submitted=False,
+        selected=False,
+        created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return {"success": True, "data": rec.to_dict()}
 
 
 @router.post("/recordings/{recording_id}/submit")
-async def submit_recording(recording_id: str):
+async def submit_recording(recording_id: str, db: Session = Depends(get_db)):
     """提交录音 — 每段允许多人提交，不自动标记完成（需管理员手动标记）"""
-    rec = RECORDINGS_DB.get(recording_id)
+    rec = db.get(Recording, recording_id)
     if not rec:
         raise HTTPException(status_code=404, detail="录音不存在")
 
-    rec["submitted"] = True
+    rec.submitted = True
 
-    seg = SEGMENTS_DB.get(rec["segment_id"])
+    seg = db.get(Segment, rec.segment_id)
     if seg:
-        # 更新提交人数
-        submitted_count = sum(
-            1 for r in RECORDINGS_DB.values()
-            if r["segment_id"] == seg["id"] and r["submitted"]
-        )
-        seg["submit_count"] = submitted_count
+        submitted_count = db.query(Recording).filter(
+            Recording.segment_id == seg.id, Recording.submitted == True
+        ).count()
+        seg.submit_count = submitted_count
 
-        song = SONGS_DB.get(seg["song_id"])
-        if song:
-            # 同步更新 SONGS_DB 中的 segment 副本（JSON 反序列化后引用不同）
-            for s in song["segments"]:
-                if s["id"] == seg["id"]:
-                    s["submit_count"] = submitted_count
-                    break
-            completed = sum(1 for s in song["segments"] if s["status"] == "completed")
-            song["completion"] = round(completed / len(song["segments"]) * 100, 1)
+        song = db.get(Song, seg.song_id)
+        if song and song.segments:
+            completed = sum(1 for s in song.segments if s.status == "completed")
+            song.completion = round(completed / len(song.segments) * 100, 1)
 
-    _save_db()
-    return {"success": True, "data": rec}
+    db.commit()
+    db.refresh(rec)
+    return {"success": True, "data": rec.to_dict()}
 
 
 @router.post("/segments/{segment_id}/complete")
-async def mark_segment_completed(segment_id: str, request: Request):
+async def mark_segment_completed(segment_id: str, request: Request, db: Session = Depends(get_db)):
     """管理员标记唱段为已完成"""
     verify_admin(request)
-    seg = SEGMENTS_DB.get(segment_id)
+    seg = db.get(Segment, segment_id)
     if not seg:
         raise HTTPException(status_code=404, detail="唱段不存在")
 
-    seg["status"] = "completed"
+    seg.status = "completed"
 
-    song = SONGS_DB.get(seg["song_id"])
-    if song:
-        completed = sum(1 for s in song["segments"] if s["status"] == "completed")
-        song["completion"] = round(completed / len(song["segments"]) * 100, 1)
+    song = db.get(Song, seg.song_id)
+    if song and song.segments:
+        completed = sum(1 for s in song.segments if s.status == "completed")
+        song.completion = round(completed / len(song.segments) * 100, 1)
 
-    _save_db()
-    return {"success": True, "data": seg}
+    db.commit()
+    db.refresh(seg)
+    return {"success": True, "data": seg.to_dict()}
 
 
 @router.post("/segments/{segment_id}/reopen")
-async def reopen_segment(segment_id: str, request: Request):
+async def reopen_segment(segment_id: str, request: Request, db: Session = Depends(get_db)):
     """管理员重新开放已完成唱段"""
     verify_admin(request)
-    seg = SEGMENTS_DB.get(segment_id)
+    seg = db.get(Segment, segment_id)
     if not seg:
         raise HTTPException(status_code=404, detail="唱段不存在")
 
-    seg["status"] = "claimed" if seg.get("claim_count", 0) > 0 else "unassigned"
+    seg.status = "claimed" if (seg.claim_count or 0) > 0 else "unassigned"
 
-    song = SONGS_DB.get(seg["song_id"])
-    if song:
-        completed = sum(1 for s in song["segments"] if s["status"] == "completed")
-        song["completion"] = round(completed / len(song["segments"]) * 100, 1)
+    song = db.get(Song, seg.song_id)
+    if song and song.segments:
+        completed = sum(1 for s in song.segments if s.status == "completed")
+        song.completion = round(completed / len(song.segments) * 100, 1)
 
-    _save_db()
-    return {"success": True, "data": seg}
+    db.commit()
+    db.refresh(seg)
+    return {"success": True, "data": seg.to_dict()}
 
 
 @router.delete("/recordings/{recording_id}")
-async def delete_recording(recording_id: str, request: Request):
+async def delete_recording(recording_id: str, request: Request, db: Session = Depends(get_db)):
     """删除录音"""
     verify_admin(request)
-    rec = RECORDINGS_DB.pop(recording_id, None)
+    rec = db.get(Recording, recording_id)
     if not rec:
         raise HTTPException(status_code=404, detail="录音不存在")
-    filepath = os.path.join(UPLOAD_DIR, f"{recording_id}.webm")
+    audio_url = rec.audio_url or ""
+    db.delete(rec)
+    db.commit()
+
+    fname = audio_url.split("/")[-1] if "/" in audio_url else f"{recording_id}.webm"
+    filepath = os.path.join(UPLOAD_DIR, fname)
     if os.path.exists(filepath):
-        os.remove(filepath)
-    _save_db()
+        try:
+            os.remove(filepath)
+        except Exception:
+            pass
     return {"success": True, "message": "已删除"}
 
 
 @router.get("/recordings")
-async def get_recordings(song_id: Optional[str] = None, segment_id: Optional[str] = None):
-    """获取录音列表"""
-    results = list(RECORDINGS_DB.values())
+async def get_recordings(
+    song_id: Optional[str] = None,
+    segment_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """获取录音列表（仅 submitted）"""
+    q = db.query(Recording).filter(Recording.submitted == True)
     if song_id:
-        results = [r for r in results if r["song_id"] == song_id]
+        q = q.filter(Recording.song_id == song_id)
     if segment_id:
-        results = [r for r in results if r["segment_id"] == segment_id]
-    results = [r for r in results if r["submitted"]]
-    return {"success": True, "data": results}
+        q = q.filter(Recording.segment_id == segment_id)
+    return {"success": True, "data": [r.to_dict() for r in q.all()]}
 
 
 @router.post("/recordings/{recording_id}/like")
-async def like_recording(recording_id: str):
+async def like_recording(recording_id: str, db: Session = Depends(get_db)):
     """点赞录音"""
-    rec = RECORDINGS_DB.get(recording_id)
+    rec = db.get(Recording, recording_id)
     if not rec:
         raise HTTPException(status_code=404, detail="录音不存在")
-    rec["likes"] += 1
-    _save_db()
-    return {"success": True, "data": rec}
+    rec.likes = (rec.likes or 0) + 1
+    db.commit()
+    db.refresh(rec)
+    return {"success": True, "data": rec.to_dict()}
 
 
 @router.post("/admin/segments/{segment_id}/complete")
-async def admin_mark_segment_completed(segment_id: str, request: Request):
-    return await mark_segment_completed(segment_id, request)
+async def admin_mark_segment_completed(segment_id: str, request: Request, db: Session = Depends(get_db)):
+    return await mark_segment_completed(segment_id, request, db)
 
 
 @router.post("/admin/segments/{segment_id}/reopen")
-async def admin_reopen_segment(segment_id: str, request: Request):
-    return await reopen_segment(segment_id, request)
+async def admin_reopen_segment(segment_id: str, request: Request, db: Session = Depends(get_db)):
+    return await reopen_segment(segment_id, request, db)
 
 
 @router.delete("/admin/recordings/{recording_id}")
-async def admin_delete_recording(recording_id: str, request: Request):
-    return await delete_recording(recording_id, request)
+async def admin_delete_recording(recording_id: str, request: Request, db: Session = Depends(get_db)):
+    return await delete_recording(recording_id, request, db)
 
 
 # ============ 音频文件服务 ============
@@ -1818,11 +1832,11 @@ async def admin_upload_song(
     title: str = Form(...),
     artist: str = Form(""),
     audio: UploadFile = File(...),
+    db: Session = Depends(get_db),
 ):
     """上传新歌曲：保存音频文件 → 读取时长（不进行切分，等歌词上传后再切分）"""
     verify_admin(request)
 
-    # 检查文件类型
     _, ext = os.path.splitext(audio.filename or "")
     ext = ext.lower()
     if ext not in ALLOWED_AUDIO_EXT:
@@ -1832,50 +1846,51 @@ async def admin_upload_song(
     safe_filename = f"{song_id}{ext}"
     filepath = os.path.join(UPLOAD_DIR, safe_filename)
 
-    # 保存文件
     content = await audio.read()
     with open(filepath, "wb") as f:
         f.write(content)
 
-    # 获取音频时长
     duration = _get_audio_duration(filepath)
     if duration <= 0:
         os.remove(filepath)
         raise HTTPException(status_code=400, detail="无法读取音频时长，请检查文件是否损坏")
 
     audio_url = f"/api/uploads/{safe_filename}"
-
-    song = {
-        "id": song_id,
-        "title": title.strip() or os.path.splitext(audio.filename or "未命名")[0],
-        "artist": artist.strip(),
-        "duration": duration,
-        "audio_url": audio_url,
-        "audio_file": safe_filename,
-        "original_filename": audio.filename,
-        "segment_count": 0,
-        "participant_count": 0,
-        "completion": 0.0,
-        "segments": [],
-        "has_lyrics": False,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    SONGS_DB[song_id] = song
-    _save_db()
+    song = Song(
+        id=song_id,
+        title=title.strip() or os.path.splitext(audio.filename or "未命名")[0],
+        artist=artist.strip(),
+        duration=duration,
+        audio_url=audio_url,
+        audio_file=safe_filename,
+        original_filename=audio.filename,
+        segment_count=0,
+        participant_count=0,
+        completion=0.0,
+        has_lyrics=False,
+        task_published=False,
+        created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    db.add(song)
+    db.commit()
+    db.refresh(song)
 
     print(f"[upload] new song: {title} ({artist}), duration={duration}s, no segments (awaiting lyrics)")
-    return {"success": True, "data": song}
+    return {"success": True, "data": song.to_dict()}
 
 
 @router.get("/admin/songs")
-async def admin_get_songs(request: Request):
+async def admin_get_songs(request: Request, db: Session = Depends(get_db)):
     """获取所有歌曲（含完整信息）"""
     verify_admin(request)
+    songs_orm = db.query(Song).all()
+    rec_counts = dict(
+        db.query(Recording.song_id, sql_func.count(Recording.id)).group_by(Recording.song_id).all()
+    )
     songs = []
-    for s in SONGS_DB.values():
-        # 检查原曲文件是否存在（兼容 /api/uploads/ 和 /api/music/ 两种路径）
-        audio_file = s.get("audio_file", "")
-        audio_url = s.get("audio_url", "")
+    for s in songs_orm:
+        audio_file = s.audio_file or ""
+        audio_url = s.audio_url or ""
         audio_exists = False
         if audio_file:
             audio_exists = os.path.exists(os.path.join(UPLOAD_DIR, audio_file))
@@ -1886,120 +1901,158 @@ async def admin_get_songs(request: Request):
             elif "/api/music/" in audio_url:
                 fname = audio_url.split("/api/music/")[-1]
                 audio_exists = os.path.exists(os.path.join(MUSIC_DIR, fname))
-        # 检查伴奏文件是否存在
-        acc_file = s.get("accompaniment_file", "")
+        acc_file = s.accompaniment_file or ""
         has_acc = bool(acc_file) and os.path.exists(os.path.join(UPLOAD_DIR, acc_file))
-        # 动态计算是否有歌词（兼容旧数据）
-        has_lyrics = s.get("has_lyrics", False) or any(seg.get("lyrics", "").strip() for seg in s.get("segments", []))
-        songs.append({
-            **s,
-            "claimed_count": sum(1 for seg in s["segments"] if seg["status"] != "unassigned"),
-            "completed_count": sum(1 for seg in s["segments"] if seg["status"] == "completed"),
-            "recording_count": sum(1 for r in RECORDINGS_DB.values() if r["song_id"] == s["id"]),
+        has_lyrics = bool(s.has_lyrics) or any((seg.lyrics or "").strip() for seg in s.segments)
+        d = s.to_dict(include_segments=True)
+        d.update({
+            "claimed_count": sum(1 for seg in s.segments if seg.status != "unassigned"),
+            "completed_count": sum(1 for seg in s.segments if seg.status == "completed"),
+            "recording_count": int(rec_counts.get(s.id, 0)),
             "audio_file_exists": audio_exists,
             "has_accompaniment": has_acc,
             "has_lyrics": has_lyrics,
         })
+        songs.append(d)
     return {"success": True, "data": songs}
 
 
 @router.get("/admin/songs/{song_id}")
-async def admin_get_song(song_id: str, request: Request):
+async def admin_get_song(song_id: str, request: Request, db: Session = Depends(get_db)):
     """获取歌曲完整详情"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
-    # 附带每段的录音信息
+
+    # 该歌曲所有录音按 segment_id 分组
+    recs_by_seg = {}
+    for r in db.query(Recording).filter(Recording.song_id == song_id).all():
+        recs_by_seg.setdefault(r.segment_id, []).append(r.to_dict())
+
     enriched_segments = []
-    for seg in song["segments"]:
-        recs = [r for r in RECORDINGS_DB.values() if r["segment_id"] == seg["id"]]
-        enriched_segments.append({**seg, "recordings": recs})
-    # 动态计算 has_accompaniment / has_lyrics（与列表接口一致）
-    acc_file = song.get("accompaniment_file", "")
+    for seg in song.segments:
+        seg_d = seg.to_dict()
+        seg_d["recordings"] = recs_by_seg.get(seg.id, [])
+        enriched_segments.append(seg_d)
+
+    acc_file = song.accompaniment_file or ""
     has_acc = bool(acc_file) and os.path.exists(os.path.join(UPLOAD_DIR, acc_file))
-    has_lyrics = song.get("has_lyrics", False) or any(
-        seg.get("lyrics", "").strip() for seg in song.get("segments", [])
-    )
-    return {"success": True, "data": {
-        **song,
-        "segments": enriched_segments,
-        "has_accompaniment": has_acc,
-        "has_lyrics": has_lyrics,
-    }}
+    has_lyrics = bool(song.has_lyrics) or any((seg.lyrics or "").strip() for seg in song.segments)
+
+    data = song.to_dict(include_segments=False)
+    data["segments"] = enriched_segments
+    data["has_accompaniment"] = has_acc
+    data["has_lyrics"] = has_lyrics
+    # 自由任务在前端可单独拉，但保留兼容
+    data["free_tasks"] = [ft.to_dict() for ft in song.free_tasks]
+    return {"success": True, "data": data}
 
 
 @router.put("/admin/songs/{song_id}")
-async def admin_update_song(song_id: str, request: Request):
+async def admin_update_song(song_id: str, request: Request, db: Session = Depends(get_db)):
     """更新歌曲基本信息"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
     body = await request.json()
-    for key in ["title", "artist", "duration"]:
-        if key in body:
-            song[key] = body[key]
-    _save_db()
-    return {"success": True, "data": song}
+    if "title" in body:
+        song.title = body["title"]
+    if "artist" in body:
+        song.artist = body["artist"]
+    if "duration" in body:
+        song.duration = body["duration"]
+    db.commit()
+    db.refresh(song)
+    return {"success": True, "data": song.to_dict()}
 
 
 @router.delete("/admin/songs/{song_id}")
-async def admin_delete_song(song_id: str, request: Request):
+async def admin_delete_song(song_id: str, request: Request, db: Session = Depends(get_db)):
     """删除歌曲及其所有关联数据和文件"""
     verify_admin(request)
-    song = SONGS_DB.pop(song_id, None)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
-    # 清理唱段
-    seg_ids = [seg["id"] for seg in song["segments"]]
-    for sid in seg_ids:
-        SEGMENTS_DB.pop(sid, None)
-    # 清理录音数据和文件
-    to_del = [rid for rid, r in RECORDINGS_DB.items() if r["song_id"] == song_id]
-    for rid in to_del:
-        rec = RECORDINGS_DB.pop(rid, None)
-        if rec:
-            rec_file = os.path.join(UPLOAD_DIR, os.path.basename(rec.get("audio_url", "")))
-            if os.path.exists(rec_file):
-                try: os.remove(rec_file)
-                except: pass
-    # 清理认领数据
-    claim_ids = [cid for cid, c in CLAIMS_DB.items() if c.get("segment_id") in seg_ids]
-    for cid in claim_ids:
-        CLAIMS_DB.pop(cid, None)
-    # 删除歌曲音频文件
-    audio_file = song.get("audio_file")
+
+    audio_file = song.audio_file
+    acc_file = song.accompaniment_file
+
+    # 收集需要删除的录音文件路径
+    rec_audio_urls = [r.audio_url or "" for r in db.query(Recording).filter(Recording.song_id == song_id).all()]
+    # 收集需要删除的最终成曲文件
+    finals_to_delete = db.query(Final).filter(Final.song_id == song_id).all()
+    final_files = []
+    for f in finals_to_delete:
+        if f.audio_file:
+            final_files.append(("audio", f.audio_file))
+        if f.metadata_file:
+            final_files.append(("audio", f.metadata_file))
+        if f.recordings_dir:
+            final_files.append(("dir", f.recordings_dir))
+
+    # 数据库层级删除（cascade 会自动清理 segments / segment_claims / free_tasks）
+    db.query(Recording).filter(Recording.song_id == song_id).delete(synchronize_session=False)
+    for f in finals_to_delete:
+        db.delete(f)
+    db.delete(song)
+    db.commit()
+
+    # 文件系统清理
+    for url in rec_audio_urls:
+        fname = os.path.basename(url)
+        if fname:
+            fp = os.path.join(UPLOAD_DIR, fname)
+            if os.path.exists(fp):
+                try: os.remove(fp)
+                except Exception: pass
     if audio_file:
-        audio_path = os.path.join(UPLOAD_DIR, audio_file)
-        if os.path.exists(audio_path):
-            try: os.remove(audio_path)
-            except: pass
-    # 删除伴奏文件
-    acc_file = song.get("accompaniment_file")
+        fp = os.path.join(UPLOAD_DIR, audio_file)
+        if os.path.exists(fp):
+            try: os.remove(fp)
+            except Exception: pass
     if acc_file:
-        acc_path = os.path.join(UPLOAD_DIR, acc_file)
-        if os.path.exists(acc_path):
-            try: os.remove(acc_path)
-            except: pass
-    # 清理最终成曲数据和文件
-    final_ids = [fid for fid, f in FINALS_DB.items() if f.get("song_id") == song_id]
-    for fid in final_ids:
-        final = FINALS_DB.pop(fid, None)
-        if final:
-            final_file = final.get("file_path", "")
-            if final_file and os.path.exists(final_file):
-                try: os.remove(final_file)
-                except: pass
-    _save_db()
+        fp = os.path.join(UPLOAD_DIR, acc_file)
+        if os.path.exists(fp):
+            try: os.remove(fp)
+            except Exception: pass
+    for kind, name in final_files:
+        fp = os.path.join(FINALS_DIR, name)
+        if kind == "dir" and os.path.exists(fp):
+            try: shutil.rmtree(fp)
+            except Exception: pass
+        elif kind == "audio" and os.path.exists(fp):
+            try: os.remove(fp)
+            except Exception: pass
+
     return {"success": True, "message": "歌曲已删除"}
 
 
+def _replace_segments_with_dicts(db: Session, song: Song, seg_dicts: list) -> list:
+    """删除该歌曲所有旧 segment 并按 dict 列表新建。返回新的 ORM segment 列表。"""
+    for old in list(song.segments):
+        db.delete(old)
+    db.flush()
+    new_orm = []
+    for d in seg_dicts:
+        if not d.get("id"):
+            d["id"] = f"{song.id}-{uuid.uuid4().hex[:6]}"
+        # 避免 ID 冲突
+        while db.get(Segment, d["id"]) is not None:
+            d["id"] = f"{song.id}-{uuid.uuid4().hex[:6]}"
+        seg = _new_segment_orm_from_dict(d)
+        db.add(seg)
+        new_orm.append(seg)
+    db.flush()
+    return new_orm
+
+
 @router.post("/admin/songs/{song_id}/lyrics")
-async def admin_upload_lyrics(song_id: str, request: Request):
+async def admin_upload_lyrics(song_id: str, request: Request, db: Session = Depends(get_db)):
     """为已有歌曲上传歌词（支持 LRC 格式精确匹配或纯文本 AI 分配）"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
 
@@ -2008,81 +2061,69 @@ async def admin_upload_lyrics(song_id: str, request: Request):
     if not full_lyrics:
         raise HTTPException(status_code=400, detail="歌词内容不能为空")
 
-    segments = song["segments"]
-    duration = song.get("duration", 0)
+    segments_dicts = [s.to_dict() for s in song.segments]
+    duration = song.duration or 0
     is_lrc = _is_lrc_format(full_lyrics)
     resegmented = False
-    no_segments = not segments or len(segments) == 0
+    no_segments = len(segments_dicts) == 0
 
     if is_lrc:
         lrc_lines = _parse_lrc(full_lyrics)
         if lrc_lines:
-            # 如果歌曲还没有唱段，或分段太粗糙，基于LRC进行切分
-            max_seg_dur = max((s["end_time"] - s["start_time"]) for s in segments) if segments else 999
-            if no_segments or ((max_seg_dur > 60 or len(segments) < 5) and len(lrc_lines) >= 8):
-                # 清理旧唱段
-                for seg in segments:
-                    SEGMENTS_DB.pop(seg["id"], None)
-                updated = _resegment_by_lrc(song["id"], lrc_lines, duration)
+            max_seg_dur = max((s["end_time"] - s["start_time"]) for s in segments_dicts) if segments_dicts else 999
+            if no_segments or ((max_seg_dur > 60 or len(segments_dicts) < 5) and len(lrc_lines) >= 8):
+                updated = _resegment_by_lrc(song.id, lrc_lines, duration)
                 if updated and any(s.get("lyrics", "").strip() for s in updated):
                     resegmented = True
-                    song["segment_count"] = len(updated)
+                    segments_dicts = updated
             if not resegmented:
                 if no_segments:
-                    # 无唱段且LRC行数不足以切分，先用静音检测创建唱段
-                    filepath = os.path.join(UPLOAD_DIR, song.get("audio_file", ""))
+                    filepath = os.path.join(UPLOAD_DIR, song.audio_file or "")
                     if os.path.exists(filepath):
-                        segments_new, _ = _split_and_analyze(song["id"], filepath, duration)
-                        segments = segments_new
-                        song["segments"] = segments
-                        song["segment_count"] = len(segments)
-                updated = _assign_lrc_to_segments(segments, lrc_lines)
+                        seg_new, _ = _split_and_analyze(song.id, filepath, duration)
+                        segments_dicts = seg_new
+                updated = _assign_lrc_to_segments(segments_dicts, lrc_lines)
+                segments_dicts = updated
         else:
-            updated = segments
+            updated = segments_dicts
     else:
-        # 纯文本歌词：如果没有唱段，先用静音检测创建
         if no_segments:
-            filepath = os.path.join(UPLOAD_DIR, song.get("audio_file", ""))
+            filepath = os.path.join(UPLOAD_DIR, song.audio_file or "")
             if os.path.exists(filepath):
-                segments_new, _ = _split_and_analyze(song["id"], filepath, duration)
-                segments = segments_new
-                song["segments"] = segments
-                song["segment_count"] = len(segments)
-        updated = _ai_assign_lyrics(segments, full_lyrics)
+                seg_new, _ = _split_and_analyze(song.id, filepath, duration)
+                segments_dicts = seg_new
+        updated = _ai_assign_lyrics(segments_dicts, full_lyrics)
+        segments_dicts = updated
 
-    has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
+    has_lyrics = any(s.get("lyrics", "").strip() for s in segments_dicts)
     if not has_lyrics:
         method = "LRC 解析" if is_lrc else "AI 歌词分配"
         return {"success": False, "detail": f"{method}未成功，请检查歌词内容或格式"}
 
-    # 更新唱段和歌曲状态
-    song["segments"] = updated
-    song["has_lyrics"] = True
-    song["segment_count"] = len(updated)
-    for seg in updated:
-        SEGMENTS_DB[seg["id"]] = seg
-    _save_db()
+    _replace_segments_with_dicts(db, song, segments_dicts)
+    song.has_lyrics = True
+    song.segment_count = len(segments_dicts)
+    db.commit()
 
     method = "LRC精确匹配" if is_lrc else "AI智能分配"
     if resegmented:
         method += "（已按歌词重新分段）"
-    assigned = sum(1 for s in updated if s.get('lyrics'))
+    assigned = sum(1 for s in segments_dicts if s.get('lyrics'))
     print(f"[lyrics] song {song_id}: {method}, lyrics assigned to {assigned} segments")
-    return {"success": True, "data": {"has_lyrics": True, "segment_count": len(updated), "method": method}}
+    return {"success": True, "data": {"has_lyrics": True, "segment_count": len(segments_dicts), "method": method}}
 
 
 @router.post("/admin/songs/{song_id}/auto-lyrics")
-async def admin_auto_fetch_lyrics(song_id: str, request: Request):
-    """自动从 lrclib.net 获取歌词并分配到唱段（参考 LDDC 的搜索匹配算法）"""
+async def admin_auto_fetch_lyrics(song_id: str, request: Request, db: Session = Depends(get_db)):
+    """自动从 lrclib.net 获取歌词并分配到唱段"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
 
-    title = song.get("title", "")
-    artist = song.get("artist", "")
-    duration = song.get("duration", 0)
-
+    title = song.title or ""
+    artist = song.artist or ""
+    duration = song.duration or 0
     if not title:
         raise HTTPException(status_code=400, detail="歌曲缺少标题信息，无法搜索歌词")
 
@@ -2096,75 +2137,57 @@ async def admin_auto_fetch_lyrics(song_id: str, request: Request):
             "data": {"match_score": fetch_result["match_score"], "track_info": fetch_result.get("track_info", {})}
         }
 
-    # 解析歌词并分配到唱段
     fetched_text = fetch_result["lrc_text"]
-    segments = song["segments"]
+    segments_dicts = [s.to_dict() for s in song.segments]
     has_lyrics = False
     resegmented = False
-    no_segments = not segments or len(segments) == 0
+    no_segments = len(segments_dicts) == 0
+    updated = segments_dicts
 
     if _is_lrc_format(fetched_text):
         lrc_lines = _parse_lrc(fetched_text)
         if lrc_lines:
-            # 检测现有分段是否太粗糙（某段超过60秒，或总段数太少），或无唱段
-            max_seg_dur = max((s["end_time"] - s["start_time"]) for s in segments) if segments else 999
-            needs_resegment = no_segments or ((max_seg_dur > 60 or len(segments) < 5) and len(lrc_lines) >= 8)
+            max_seg_dur = max((s["end_time"] - s["start_time"]) for s in segments_dicts) if segments_dicts else 999
+            needs_resegment = no_segments or ((max_seg_dur > 60 or len(segments_dicts) < 5) and len(lrc_lines) >= 8)
 
             if needs_resegment:
-                print(f"[auto-lyrics] segments too coarse or empty (max_dur={max_seg_dur:.1f}s, "
-                      f"count={len(segments)}), resegmenting by LRC timestamps...")
-                # 先清理旧唱段
-                for seg in segments:
-                    SEGMENTS_DB.pop(seg["id"], None)
-                # 基于 LRC 时间戳重新切分
-                updated = _resegment_by_lrc(song["id"], lrc_lines, duration)
+                print(f"[auto-lyrics] resegmenting by LRC...")
+                updated = _resegment_by_lrc(song.id, lrc_lines, duration)
                 if updated:
                     has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
                     resegmented = True
-                    song["segment_count"] = len(updated)
 
             if not has_lyrics:
                 if no_segments:
-                    # 无唱段且LRC行数不足以切分，先用静音检测创建唱段
-                    filepath = os.path.join(UPLOAD_DIR, song.get("audio_file", ""))
+                    filepath = os.path.join(UPLOAD_DIR, song.audio_file or "")
                     if os.path.exists(filepath):
-                        segments_new, _ = _split_and_analyze(song["id"], filepath, duration)
-                        segments = segments_new
-                        song["segments"] = segments
-                        song["segment_count"] = len(segments)
-                # 正常分配：分段足够细，直接按时间匹配
-                updated = _assign_lrc_to_segments(segments, lrc_lines)
+                        seg_new, _ = _split_and_analyze(song.id, filepath, duration)
+                        segments_dicts = seg_new
+                updated = _assign_lrc_to_segments(segments_dicts, lrc_lines)
                 has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
-    
+
     if not has_lyrics:
-        # 纯文本歌词或 LRC 匹配失败：如果没有唱段先创建
         if no_segments:
-            filepath = os.path.join(UPLOAD_DIR, song.get("audio_file", ""))
+            filepath = os.path.join(UPLOAD_DIR, song.audio_file or "")
             if os.path.exists(filepath):
-                segments_new, _ = _split_and_analyze(song["id"], filepath, duration)
-                segments = segments_new
-                song["segments"] = segments
-                song["segment_count"] = len(segments)
-        updated = _ai_assign_lyrics(segments, fetched_text)
+                seg_new, _ = _split_and_analyze(song.id, filepath, duration)
+                segments_dicts = seg_new
+        updated = _ai_assign_lyrics(segments_dicts, fetched_text)
         has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
 
     if not has_lyrics:
         return {"success": False, "detail": "歌词已获取但无法匹配到任何唱段，可能时间戳不对应"}
 
-    # 更新数据库
-    song["segments"] = updated
-    song["has_lyrics"] = True
-    song["segment_count"] = len(updated)
-    for seg in updated:
-        SEGMENTS_DB[seg["id"]] = seg
-    _save_db()
+    _replace_segments_with_dicts(db, song, updated)
+    song.has_lyrics = True
+    song.segment_count = len(updated)
+    db.commit()
 
     assigned = sum(1 for s in updated if s.get('lyrics'))
     method_desc = fetch_result["method"]
     if resegmented:
         method_desc += "（已按歌词重新分段）"
-    print(f"[auto-lyrics] success: {method_desc}, score={fetch_result['match_score']}, "
-          f"{assigned}/{len(updated)} segments assigned, resegmented={resegmented}")
+    print(f"[auto-lyrics] success: {method_desc}, {assigned}/{len(updated)} assigned")
     return {
         "success": True,
         "data": {
@@ -2182,114 +2205,123 @@ async def admin_auto_fetch_lyrics(song_id: str, request: Request):
 # ============ 管理员 - 唱段管理 ============
 
 @router.put("/admin/segments/{segment_id}")
-async def admin_update_segment(segment_id: str, request: Request):
+async def admin_update_segment(segment_id: str, request: Request, db: Session = Depends(get_db)):
     """更新唱段信息（时间、歌词、难度等）"""
     verify_admin(request)
-    seg = SEGMENTS_DB.get(segment_id)
+    seg = db.get(Segment, segment_id)
     if not seg:
         raise HTTPException(status_code=404, detail="唱段不存在")
     body = await request.json()
     for key in ["start_time", "end_time", "lyrics", "difficulty", "is_chorus", "status"]:
         if key in body:
-            seg[key] = body[key]
-    _save_db()
-    return {"success": True, "data": seg}
+            setattr(seg, key, body[key])
+    db.commit()
+    db.refresh(seg)
+    return {"success": True, "data": seg.to_dict()}
 
 
 @router.post("/admin/songs/{song_id}/segments")
-async def admin_add_segment(song_id: str, request: Request):
+async def admin_add_segment(song_id: str, request: Request, db: Session = Depends(get_db)):
     """新增唱段"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
     body = await request.json()
-    seg_id = f"{song_id}-{len(song['segments'])+1:02d}"
-    # 确保 ID 唯一
-    while seg_id in SEGMENTS_DB:
+
+    existing_count = len(song.segments)
+    seg_id = f"{song_id}-{existing_count+1:02d}"
+    while db.get(Segment, seg_id) is not None:
         seg_id = f"{song_id}-{uuid.uuid4().hex[:4]}"
-    seg = {
-        "id": seg_id,
-        "song_id": song_id,
-        "index": len(song["segments"]) + 1,
-        "start_time": body.get("start_time", 0),
-        "end_time": body.get("end_time", 0),
-        "lyrics": body.get("lyrics", ""),
-        "difficulty": body.get("difficulty", "normal"),
-        "is_chorus": body.get("is_chorus", False),
-        "status": "unassigned",
-        "claim_count": 0,
-        "submit_count": 0,
-        "claims": [],
-    }
-    SEGMENTS_DB[seg_id] = seg
-    song["segments"].append(seg)
-    song["segment_count"] = len(song["segments"])
+
+    seg = Segment(
+        id=seg_id,
+        song_id=song_id,
+        index=existing_count + 1,
+        start_time=body.get("start_time", 0),
+        end_time=body.get("end_time", 0),
+        lyrics=body.get("lyrics", ""),
+        difficulty=body.get("difficulty", "normal"),
+        is_chorus=bool(body.get("is_chorus", False)),
+        status="unassigned",
+        claim_count=0,
+        submit_count=0,
+        created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    db.add(seg)
+    db.flush()
+    db.refresh(song)
+
     # 按 start_time 排序并重新编号
-    song["segments"].sort(key=lambda s: s["start_time"])
-    for i, s in enumerate(song["segments"]):
-        s["index"] = i + 1
-    _save_db()
-    return {"success": True, "data": seg}
+    sorted_segs = sorted(song.segments, key=lambda s: s.start_time)
+    for i, s in enumerate(sorted_segs):
+        s.index = i + 1
+    song.segment_count = len(sorted_segs)
+    db.commit()
+    db.refresh(seg)
+    return {"success": True, "data": seg.to_dict()}
 
 
 @router.delete("/admin/segments/{segment_id}")
-async def admin_delete_segment(segment_id: str, request: Request):
+async def admin_delete_segment(segment_id: str, request: Request, db: Session = Depends(get_db)):
     """删除唱段"""
     verify_admin(request)
-    seg = SEGMENTS_DB.pop(segment_id, None)
+    seg = db.get(Segment, segment_id)
     if not seg:
         raise HTTPException(status_code=404, detail="唱段不存在")
-    song = SONGS_DB.get(seg["song_id"])
+    song = db.get(Song, seg.song_id)
+    db.delete(seg)
+    db.flush()
+
     if song:
-        song["segments"] = [s for s in song["segments"] if s["id"] != segment_id]
-        song["segment_count"] = len(song["segments"])
-        for i, s in enumerate(song["segments"]):
-            s["index"] = i + 1
-    _save_db()
+        sorted_segs = sorted(song.segments, key=lambda s: s.start_time)
+        for i, s in enumerate(sorted_segs):
+            s.index = i + 1
+        song.segment_count = len(sorted_segs)
+    db.commit()
     return {"success": True, "message": "唱段已删除"}
 
 
 @router.put("/admin/songs/{song_id}/segments/batch")
-async def admin_batch_update_segments(song_id: str, request: Request):
+async def admin_batch_update_segments(song_id: str, request: Request, db: Session = Depends(get_db)):
     """批量替换唱段（前端方案原样写入）"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
-    if song.get("task_published"):
+    if song.task_published:
         raise HTTPException(status_code=400, detail="任务已发布，无法修改分段。请先取消任务。")
     body = await request.json()
     segments_data = body.get("segments", [])
     confirm_delete = body.get("confirm_delete", False)
 
-    old_seg_ids = {s["id"] for s in song["segments"]}
+    old_segs = list(song.segments)
+    old_seg_ids = {s.id for s in old_segs}
+    old_seg_lookup = {s.id: s for s in old_segs}
     new_seg_ids = {s.get("id") for s in segments_data if s.get("id")}
-
-    # 找出将失效的 segment ID（旧ID中不在新数据里的）
     removed_seg_ids = old_seg_ids - new_seg_ids
 
-    # 统计这些失效段关联的已提交录音
-    orphan_recs = [
-        r for r in RECORDINGS_DB.values()
-        if r.get("song_id") == song_id and r.get("submitted")
-        and r["segment_id"] in removed_seg_ids
-    ]
+    # 找将失效的已提交录音
+    orphan_recs = []
+    if removed_seg_ids:
+        orphan_recs = db.query(Recording).filter(
+            Recording.song_id == song_id,
+            Recording.submitted == True,
+            Recording.segment_id.in_(removed_seg_ids),
+        ).all()
 
-    # 如果有失效录音且前端未确认，返回预检信息
     if orphan_recs and not confirm_delete:
-        # 按段分组统计详情
         detail = {}
         for r in orphan_recs:
-            seg_id = r["segment_id"]
-            if seg_id not in detail:
-                old_seg = next((s for s in song["segments"] if s["id"] == seg_id), None)
-                detail[seg_id] = {
-                    "lyrics": old_seg["lyrics"] if old_seg else "",
-                    "index": old_seg["index"] if old_seg else 0,
+            sid = r.segment_id
+            if sid not in detail:
+                old_seg = old_seg_lookup.get(sid)
+                detail[sid] = {
+                    "lyrics": (old_seg.lyrics or "") if old_seg else "",
+                    "index": old_seg.index if old_seg else 0,
                     "count": 0,
                 }
-            detail[seg_id]["count"] += 1
+            detail[sid]["count"] += 1
         return {
             "success": False,
             "need_confirm": True,
@@ -2297,162 +2329,143 @@ async def admin_batch_update_segments(song_id: str, request: Request):
             "detail": list(detail.values()),
         }
 
-    # 确认后：删除失效录音及其音频文件
-    if orphan_recs:
-        for r in orphan_recs:
-            rec_file = os.path.join(UPLOAD_DIR, os.path.basename(r.get("audio_url", "")))
-            if os.path.exists(rec_file):
-                try:
-                    os.remove(rec_file)
-                except Exception:
-                    pass
-            RECORDINGS_DB.pop(r["id"], None)
-        # 同时清理该歌曲所有未提交的失效录音
-        draft_orphans = [
-            rid for rid, r in RECORDINGS_DB.items()
-            if r.get("song_id") == song_id and not r.get("submitted")
-            and r["segment_id"] in removed_seg_ids
-        ]
-        for rid in draft_orphans:
-            r = RECORDINGS_DB.pop(rid, None)
-            if r:
-                rec_file = os.path.join(UPLOAD_DIR, os.path.basename(r.get("audio_url", "")))
-                if os.path.exists(rec_file):
-                    try:
-                        os.remove(rec_file)
-                    except Exception:
-                        pass
+    # 删除将失效段相关的录音（含未提交）+ 音频文件
+    deleted_recordings = 0
+    if removed_seg_ids:
+        all_orphan_recs = db.query(Recording).filter(
+            Recording.song_id == song_id,
+            Recording.segment_id.in_(removed_seg_ids),
+        ).all()
+        for r in all_orphan_recs:
+            rec_url = r.audio_url or ""
+            fname = os.path.basename(rec_url)
+            if fname:
+                fp = os.path.join(UPLOAD_DIR, fname)
+                if os.path.exists(fp):
+                    try: os.remove(fp)
+                    except Exception: pass
+            db.delete(r)
+        deleted_recordings = sum(1 for r in all_orphan_recs if r.submitted)
 
-    # 清除该歌曲所有旧段
-    for old_seg in song["segments"]:
-        SEGMENTS_DB.pop(old_seg["id"], None)
+    # 删除所有旧段（cascade 自动清 claims）
+    for old in old_segs:
+        db.delete(old)
+    db.flush()
 
-    # 用前端数据原样重建
-    new_segments = []
-    for i, seg_data in enumerate(segments_data):
+    # 重建
+    new_segs_orm = []
+    for i, sd in enumerate(segments_data):
         new_id = f"{song_id}-{uuid.uuid4().hex[:6]}"
-        while new_id in SEGMENTS_DB:
+        while db.get(Segment, new_id) is not None:
             new_id = f"{song_id}-{uuid.uuid4().hex[:6]}"
-        seg_status = seg_data.get("status", "unassigned")
-        if seg_status == "claimed":
-            seg_status = "unassigned"
-        seg = {
-            "id": new_id,
-            "song_id": song_id,
-            "index": i + 1,
-            "start_time": seg_data.get("start_time", 0),
-            "end_time": seg_data.get("end_time", 0),
-            "lyrics": seg_data.get("lyrics", ""),
-            "difficulty": seg_data.get("difficulty", "normal"),
-            "is_chorus": seg_data.get("is_chorus", False),
-            "status": seg_status,
-            "claim_count": 0,
-            "submit_count": 0,
-            "claims": [],
-        }
-        SEGMENTS_DB[new_id] = seg
-        new_segments.append(seg)
+        status = sd.get("status", "unassigned")
+        if status == "claimed":
+            status = "unassigned"
+        seg = Segment(
+            id=new_id,
+            song_id=song_id,
+            index=i + 1,
+            start_time=sd.get("start_time", 0),
+            end_time=sd.get("end_time", 0),
+            lyrics=sd.get("lyrics", ""),
+            difficulty=sd.get("difficulty", "normal"),
+            is_chorus=bool(sd.get("is_chorus", False)),
+            status=status,
+            claim_count=0,
+            submit_count=0,
+            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        db.add(seg)
+        new_segs_orm.append(seg)
 
-    song["segments"] = new_segments
-    song["segment_count"] = len(new_segments)
-    _save_db()
-    return {"success": True, "data": new_segments, "deleted_recordings": len(orphan_recs)}
+    song.segment_count = len(new_segs_orm)
+    db.commit()
+    return {
+        "success": True,
+        "data": [s.to_dict() for s in new_segs_orm],
+        "deleted_recordings": deleted_recordings,
+    }
 
 
 @router.post("/admin/songs/{song_id}/publish-task")
-async def admin_publish_task(song_id: str, request: Request):
-    """发布歌曲任务，前端任务页才会显示该歌曲"""
+async def admin_publish_task(song_id: str, request: Request, db: Session = Depends(get_db)):
+    """发布歌曲任务"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
-    if not song.get("segments"):
+    if not song.segments:
         raise HTTPException(status_code=400, detail="歌曲没有唱段数据，请先完成分段编辑")
-    song["task_published"] = True
-    song["task_published_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _save_db()
-    return {"success": True, "data": song}
+    song.task_published = True
+    song.task_published_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.commit()
+    db.refresh(song)
+    return {"success": True, "data": song.to_dict()}
 
 
 @router.post("/admin/songs/{song_id}/unpublish-task")
-async def admin_unpublish_task(song_id: str, request: Request):
+async def admin_unpublish_task(song_id: str, request: Request, db: Session = Depends(get_db)):
     """取消歌曲任务，删除该歌曲所有用户录音并恢复可编辑状态"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
 
-    # 删除该歌曲所有录音及音频文件
-    recs_to_delete = [
-        rid for rid, r in RECORDINGS_DB.items()
-        if r.get("song_id") == song_id
-    ]
+    # 删除录音 + 文件
+    recs = db.query(Recording).filter(Recording.song_id == song_id).all()
     deleted_count = 0
-    for rid in recs_to_delete:
-        r = RECORDINGS_DB.pop(rid, None)
-        if r:
-            audio_url = r.get("audio_url", "")
-            filename = audio_url.split("/")[-1] if "/" in audio_url else audio_url
-            if filename:
-                filepath = os.path.join(UPLOAD_DIR, filename)
-                if os.path.exists(filepath):
-                    try:
-                        os.remove(filepath)
-                    except Exception:
-                        pass
-            deleted_count += 1
+    for r in recs:
+        url = r.audio_url or ""
+        fname = url.split("/")[-1] if "/" in url else url
+        if fname:
+            fp = os.path.join(UPLOAD_DIR, fname)
+            if os.path.exists(fp):
+                try: os.remove(fp)
+                except Exception: pass
+        db.delete(r)
+        deleted_count += 1
 
-    # 重置所有唱段状态
-    for seg in song.get("segments", []):
-        seg["status"] = "unassigned"
-        seg["claim_count"] = 0
-        seg["submit_count"] = 0
-        seg["claims"] = []
-        # 清理 SEGMENTS_DB 中对应的记录
-        if seg["id"] in SEGMENTS_DB:
-            SEGMENTS_DB[seg["id"]]["status"] = "unassigned"
-            SEGMENTS_DB[seg["id"]]["claim_count"] = 0
-            SEGMENTS_DB[seg["id"]]["submit_count"] = 0
-            SEGMENTS_DB[seg["id"]]["claims"] = []
+    # 重置所有唱段状态 + 清空认领
+    for seg in song.segments:
+        seg.status = "unassigned"
+        seg.claim_count = 0
+        seg.submit_count = 0
+        for c in list(seg.claims):
+            db.delete(c)
 
-    # 清理该歌曲的 claims
-    claims_to_delete = [
-        cid for cid, c in CLAIMS_DB.items()
-        if c.get("song_id") == song_id
-    ]
-    for cid in claims_to_delete:
-        CLAIMS_DB.pop(cid, None)
-
-    song["task_published"] = False
-    song.pop("task_published_at", None)
-    _save_db()
+    song.task_published = False
+    song.task_published_at = None
+    db.commit()
     return {"success": True, "deleted_recordings": deleted_count}
 
 
 # ============ 管理员 - 自由任务管理 ============
 
 @router.get("/admin/songs/{song_id}/free-tasks")
-async def admin_get_free_tasks(song_id: str, request: Request):
+async def admin_get_free_tasks(song_id: str, request: Request, db: Session = Depends(get_db)):
     """获取歌曲的自由任务列表"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
-    # 附加每个自由任务的录音
     free_tasks = []
-    for ft in song.get("free_tasks", []):
-        ft_data = dict(ft)
-        ft_data["recordings"] = [r for r in RECORDINGS_DB.values()
-                                  if r.get("song_id") == song_id and r.get("segment_id") == ft["id"]]
+    for ft in song.free_tasks:
+        ft_data = ft.to_dict()
+        ft_data["recordings"] = [
+            r.to_dict() for r in db.query(Recording).filter(
+                Recording.song_id == song_id,
+                Recording.segment_id == ft.id,
+            ).all()
+        ]
         free_tasks.append(ft_data)
     return {"success": True, "data": free_tasks}
 
 
 @router.post("/admin/songs/{song_id}/free-tasks")
-async def admin_create_free_task(song_id: str, request: Request):
+async def admin_create_free_task(song_id: str, request: Request, db: Session = Depends(get_db)):
     """创建新的自由任务（最多5个）"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
 
@@ -2468,112 +2481,111 @@ async def admin_create_free_task(song_id: str, request: Request):
     if end_time - start_time < 5:
         raise HTTPException(status_code=400, detail="时间间隔至少需要5秒")
 
-    existing = song.get("free_tasks", [])
-    if len(existing) >= 5:
+    if len(song.free_tasks) >= 5:
         raise HTTPException(status_code=400, detail="每首歌曲最多5个自由任务")
 
-    new_ft = {
-        "id": f"ft_{uuid.uuid4().hex[:8]}",
-        "description": description,
-        "start_time": start_time,
-        "end_time": end_time,
-        "difficulty": difficulty,
-        "type": task_type,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    existing.append(new_ft)
-    song["free_tasks"] = existing
-    _save_db()
-    new_ft["recordings"] = []
-    return {"success": True, "data": new_ft}
+    ft = FreeTask(
+        id=f"ft_{uuid.uuid4().hex[:8]}",
+        song_id=song_id,
+        description=description,
+        start_time=start_time,
+        end_time=end_time,
+        difficulty=difficulty,
+        task_type=task_type,
+        created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    db.add(ft)
+    db.commit()
+    db.refresh(ft)
+    data = ft.to_dict()
+    data["recordings"] = []
+    return {"success": True, "data": data}
 
 
 @router.delete("/admin/songs/{song_id}/free-tasks/{free_task_id}")
-async def admin_delete_free_task(song_id: str, free_task_id: str, request: Request):
+async def admin_delete_free_task(song_id: str, free_task_id: str, request: Request, db: Session = Depends(get_db)):
     """删除自由任务（同时删除其录音）"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
 
-    free_tasks = song.get("free_tasks", [])
-    matched = [ft for ft in free_tasks if ft["id"] == free_task_id]
-    if not matched:
+    ft = db.query(FreeTask).filter(FreeTask.id == free_task_id, FreeTask.song_id == song_id).first()
+    if not ft:
         raise HTTPException(status_code=404, detail="自由任务不存在")
 
-    # 删除该自由任务的所有录音及文件
-    recs_to_del = [r for r in RECORDINGS_DB.values()
-                   if r.get("segment_id") == free_task_id]
+    recs_to_del = db.query(Recording).filter(Recording.segment_id == free_task_id).all()
     for rec in recs_to_del:
-        audio_url = rec.get("audio_url", "")
-        filename = audio_url.split("/")[-1] if "/" in audio_url else audio_url
-        if filename:
-            filepath = os.path.join(UPLOAD_DIR, filename)
-            if os.path.exists(filepath):
-                try: os.remove(filepath)
+        url = rec.audio_url or ""
+        fname = url.split("/")[-1] if "/" in url else url
+        if fname:
+            fp = os.path.join(UPLOAD_DIR, fname)
+            if os.path.exists(fp):
+                try: os.remove(fp)
                 except Exception: pass
-        RECORDINGS_DB.pop(rec.get("id"), None)
+        db.delete(rec)
 
-    # 从列表移除
-    song["free_tasks"] = [ft for ft in free_tasks if ft["id"] != free_task_id]
-    _save_db()
+    db.delete(ft)
+    db.commit()
     return {"success": True, "deleted_recordings": len(recs_to_del)}
 
 
 # ============ 管理员 - 录音管理 ============
 
 @router.get("/admin/recordings")
-async def admin_get_recordings(request: Request, song_id: Optional[str] = None):
+async def admin_get_recordings(request: Request, song_id: Optional[str] = None, db: Session = Depends(get_db)):
     """获取所有录音（含未提交的）"""
     verify_admin(request)
-    results = list(RECORDINGS_DB.values())
+    q = db.query(Recording)
     if song_id:
-        results = [r for r in results if r["song_id"] == song_id]
-    return {"success": True, "data": results}
+        q = q.filter(Recording.song_id == song_id)
+    return {"success": True, "data": [r.to_dict() for r in q.all()]}
 
 
 @router.post("/admin/recordings/{recording_id}/select")
-async def admin_select_recording(recording_id: str, request: Request):
+async def admin_select_recording(recording_id: str, request: Request, db: Session = Depends(get_db)):
     """选定录音为该唱段的最终版本
     独唱段：互斥，同段仅允许一条选定
     合唱段：允许多选（最多20条）
     """
     verify_admin(request)
-    rec = RECORDINGS_DB.get(recording_id)
+    rec = db.get(Recording, recording_id)
     if not rec:
         raise HTTPException(status_code=404, detail="录音不存在")
-    seg = SEGMENTS_DB.get(rec["segment_id"])
-    is_chorus = seg.get("is_chorus", False) if seg else False
+    seg = db.get(Segment, rec.segment_id)
+    is_chorus = bool(seg.is_chorus) if seg else False
     if is_chorus:
-        # 合唱段：检查已选定数量上限
-        selected_count = sum(1 for r in RECORDINGS_DB.values()
-                            if r["segment_id"] == rec["segment_id"] and r.get("selected"))
-        if selected_count >= 20 and not rec.get("selected"):
+        selected_count = db.query(Recording).filter(
+            Recording.segment_id == rec.segment_id, Recording.selected == True
+        ).count()
+        if selected_count >= 20 and not rec.selected:
             raise HTTPException(status_code=400, detail="合唱段最多选定20条录音")
     else:
-        # 独唱段：互斥，取消同唱段其他录音的选定
-        for r in RECORDINGS_DB.values():
-            if r["segment_id"] == rec["segment_id"]:
-                r["selected"] = False
-    rec["selected"] = True
-    _save_db()
-    return {"success": True, "data": rec}
+        # 独唱段：互斥
+        db.query(Recording).filter(
+            Recording.segment_id == rec.segment_id
+        ).update({"selected": False}, synchronize_session=False)
+    rec.selected = True
+    db.commit()
+    db.refresh(rec)
+    return {"success": True, "data": rec.to_dict()}
 
 
 @router.post("/admin/recordings/{recording_id}/unselect")
-async def admin_unselect_recording(recording_id: str, request: Request):
+async def admin_unselect_recording(recording_id: str, request: Request, db: Session = Depends(get_db)):
     """取消选定录音"""
     verify_admin(request)
-    rec = RECORDINGS_DB.get(recording_id)
+    rec = db.get(Recording, recording_id)
     if not rec:
         raise HTTPException(status_code=404, detail="录音不存在")
-    rec["selected"] = False
-    _save_db()
-    return {"success": True, "data": rec}
+    rec.selected = False
+    db.commit()
+    db.refresh(rec)
+    return {"success": True, "data": rec.to_dict()}
 
 
 @router.post("/admin/recordings/{recording_id}/trim")
-async def admin_trim_recording(recording_id: str, request: Request):
+async def admin_trim_recording(recording_id: str, request: Request, db: Session = Depends(get_db)):
     """裁剪录音：将开头和结尾指定秒数的音频静音（保持总时长不变）"""
     verify_admin(request)
     body = await request.json()
@@ -2583,12 +2595,11 @@ async def admin_trim_recording(recording_id: str, request: Request):
     if trim_start <= 0 and trim_end <= 0:
         return {"success": True, "message": "无需裁剪"}
 
-    rec = RECORDINGS_DB.get(recording_id)
+    rec = db.get(Recording, recording_id)
     if not rec:
         raise HTTPException(status_code=404, detail="录音不存在")
 
-    audio_url = rec.get("audio_url", "")
-    # audio_url 格式: /api/uploads/xxx.webm
+    audio_url = rec.audio_url or ""
     filename = audio_url.split("/")[-1] if "/" in audio_url else audio_url
     src_path = os.path.join(UPLOAD_DIR, filename)
 
@@ -2600,7 +2611,7 @@ async def admin_trim_recording(recording_id: str, request: Request):
         probe = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", src_path],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
         )
         total_duration = float(probe.stdout.strip())
     except Exception:
@@ -2634,15 +2645,14 @@ async def admin_trim_recording(recording_id: str, request: Request):
     cmd = ["ffmpeg", "-y", "-i", src_path, "-af", volume_filter, "-c:v", "copy", tmp_path]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
         if result.returncode != 0:
             print(f"[trim] ffmpeg error: {result.stderr}")
             raise Exception(result.stderr[-500:] if len(result.stderr) > 500 else result.stderr)
 
         # 替换原文件
         shutil.move(tmp_path, src_path)
-        _save_db()
-        return {"success": True, "data": rec}
+        return {"success": True, "data": rec.to_dict()}
     except Exception as e:
         # 清理临时文件
         if os.path.exists(tmp_path):
@@ -2653,22 +2663,22 @@ async def admin_trim_recording(recording_id: str, request: Request):
 # ============ 管理员 - 统计 ============
 
 @router.get("/admin/stats")
-async def admin_stats(request: Request):
+async def admin_stats(request: Request, db: Session = Depends(get_db)):
     """获取系统统计"""
     verify_admin(request)
-    total_songs = len(SONGS_DB)
-    total_segments = len(SEGMENTS_DB)
-    total_recordings = len(RECORDINGS_DB)
-    total_users = len(USERS_DB)
-    completed_segments = sum(1 for s in SEGMENTS_DB.values() if s["status"] == "completed")
-    submitted_recordings = sum(1 for r in RECORDINGS_DB.values() if r["submitted"])
+    total_songs = db.query(sql_func.count(Song.id)).scalar() or 0
+    total_segments = db.query(sql_func.count(Segment.id)).scalar() or 0
+    total_recordings = db.query(sql_func.count(Recording.id)).scalar() or 0
+    total_users = db.query(sql_func.count(User.id)).scalar() or 0
+    completed_segments = db.query(sql_func.count(Segment.id)).filter(Segment.status == "completed").scalar() or 0
+    submitted_recordings = db.query(sql_func.count(Recording.id)).filter(Recording.submitted == True).scalar() or 0
     return {"success": True, "data": {
-        "total_songs": total_songs,
-        "total_segments": total_segments,
-        "total_recordings": total_recordings,
-        "total_users": total_users,
-        "completed_segments": completed_segments,
-        "submitted_recordings": submitted_recordings,
+        "total_songs": int(total_songs),
+        "total_segments": int(total_segments),
+        "total_recordings": int(total_recordings),
+        "total_users": int(total_users),
+        "completed_segments": int(completed_segments),
+        "submitted_recordings": int(submitted_recordings),
     }}
 
 
@@ -2696,10 +2706,11 @@ async def admin_upload_accompaniment(
     song_id: str,
     request: Request,
     audio: UploadFile = File(...),
+    db: Session = Depends(get_db),
 ):
-    """上传伴奏文件，校验时长与原曲基本一致（±5秒）"""
+    """上传伴奏文件，校验时长与原曲基本一致"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
 
@@ -2708,7 +2719,6 @@ async def admin_upload_accompaniment(
     if ext not in ALLOWED_AUDIO_EXT:
         raise HTTPException(status_code=400, detail=f"不支持的音频格式: {ext}")
 
-    # 保存临时文件检测时长
     tmp_filename = f"acc_{song_id}{ext}"
     tmp_filepath = os.path.join(UPLOAD_DIR, tmp_filename)
     content = await audio.read()
@@ -2720,9 +2730,9 @@ async def admin_upload_accompaniment(
         os.remove(tmp_filepath)
         raise HTTPException(status_code=400, detail="无法读取伴奏时长，请检查文件是否损坏")
 
-    song_duration = song.get("duration", 0)
+    song_duration = song.duration or 0
     diff = abs(acc_duration - song_duration)
-    tolerance = max(5.0, song_duration * 0.03)  # 容差：5秒或3%
+    tolerance = max(5.0, song_duration * 0.03)
     if diff > tolerance:
         os.remove(tmp_filepath)
         raise HTTPException(
@@ -2730,17 +2740,16 @@ async def admin_upload_accompaniment(
             detail=f"伴奏时长({acc_duration:.1f}s)与原曲({song_duration:.1f}s)相差{diff:.1f}s，超出容差{tolerance:.1f}s"
         )
 
-    # 检测通过，保存
-    song["accompaniment_url"] = f"/api/uploads/{tmp_filename}"
-    song["accompaniment_file"] = tmp_filename
-    song["accompaniment_duration"] = acc_duration
-    _save_db()
+    song.accompaniment_url = f"/api/uploads/{tmp_filename}"
+    song.accompaniment_file = tmp_filename
+    song.accompaniment_duration = acc_duration
+    db.commit()
 
     print(f"[accompaniment] song={song_id}, acc_duration={acc_duration}s, song_duration={song_duration}s, diff={diff:.1f}s")
     return {
         "success": True,
         "data": {
-            "accompaniment_url": song["accompaniment_url"],
+            "accompaniment_url": song.accompaniment_url,
             "accompaniment_duration": acc_duration,
             "song_duration": song_duration,
             "diff": round(diff, 2),
@@ -2749,20 +2758,22 @@ async def admin_upload_accompaniment(
 
 
 @router.delete("/admin/songs/{song_id}/accompaniment")
-async def admin_delete_accompaniment(song_id: str, request: Request):
+async def admin_delete_accompaniment(song_id: str, request: Request, db: Session = Depends(get_db)):
     """删除伴奏文件"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
+    song = db.get(Song, song_id)
     if not song:
         raise HTTPException(status_code=404, detail="歌曲不存在")
-    acc_file = song.pop("accompaniment_file", None)
-    song.pop("accompaniment_url", None)
-    song.pop("accompaniment_duration", None)
+    acc_file = song.accompaniment_file
+    song.accompaniment_url = None
+    song.accompaniment_file = None
+    song.accompaniment_duration = None
+    db.commit()
     if acc_file:
         fp = os.path.join(UPLOAD_DIR, acc_file)
         if os.path.exists(fp):
-            os.remove(fp)
-    _save_db()
+            try: os.remove(fp)
+            except Exception: pass
     return {"success": True, "message": "伴奏已删除"}
 
 
@@ -2788,7 +2799,7 @@ def _convert_webm_to_wav(src_path: str, dst_path: str) -> bool:
     try:
         result = subprocess.run(
             ["ffmpeg", "-y", "-i", src_path, "-ar", "44100", "-ac", "1", dst_path],
-            capture_output=True, text=True, timeout=60
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60
         )
         return result.returncode == 0
     except Exception as e:
@@ -2803,7 +2814,7 @@ def _convert_to_wav(src_path: str, dst_path: str, sr: int = 44100, mono: bool = 
         if mono:
             cmd += ["-ac", "1"]
         cmd.append(dst_path)
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
         return result.returncode == 0
     except Exception as e:
         print(f"[synth] convert failed: {e}")
@@ -3122,24 +3133,25 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
                     except Exception:
                         pass
 
-        # 保存到数据库
-        final_record = {
-            "id": final_id,
-            "song_id": song_id,
-            "song_title": song.get("title", ""),
-            "song_artist": song.get("artist", ""),
-            "duration": duration,
-            "audio_file": final_filename,
-            "audio_url": f"/api/finals/{final_filename}",
-            "metadata_file": f"meta_{song_id}_{final_id}.json",
-            "recordings_dir": f"recs_{song_id}_{final_id}",
-            "track_count": len(final_tracks),
-            "segment_count": len(segments),
-            "published": False,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        FINALS_DB[final_id] = final_record
-        _save_db()
+        # 保存到数据库（在后台线程中开新 Session）
+        with db_session() as db_bg:
+            final_orm = Final(
+                id=final_id,
+                song_id=song_id,
+                song_title=song.get("title", ""),
+                song_artist=song.get("artist", ""),
+                duration=duration,
+                audio_file=final_filename,
+                audio_url=f"/api/finals/{final_filename}",
+                metadata_file=f"meta_{song_id}_{final_id}.json",
+                recordings_dir=f"recs_{song_id}_{final_id}",
+                track_count=len(final_tracks),
+                segment_count=len(segments),
+                published=False,
+                created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            db_bg.add(final_orm)
+            db_bg.commit()
 
         task.update({
             "status": "done",
@@ -3162,46 +3174,48 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
 
 
 @router.post("/admin/songs/{song_id}/synthesize")
-async def admin_start_synthesis(song_id: str, request: Request):
+async def admin_start_synthesis(song_id: str, request: Request, db: Session = Depends(get_db)):
     """启动合成任务"""
     verify_admin(request)
-    song = SONGS_DB.get(song_id)
-    if not song:
+    song_orm = db.get(Song, song_id)
+    if not song_orm:
         raise HTTPException(status_code=404, detail="歌曲不存在")
 
-    # 检查是否已有进行中的合成
     existing = SYNTH_TASKS.get(song_id)
     if existing and existing.get("status") == "running":
         raise HTTPException(status_code=400, detail="该歌曲已有合成任务正在进行")
 
-    segments = song.get("segments", [])
-    if not segments:
+    if not song_orm.segments:
         raise HTTPException(status_code=400, detail="歌曲没有唱段")
 
-    # 读取请求体中的录音参数（升降调、混响）
     body = {}
     try:
         body = await request.json()
     except Exception:
         pass
-    rec_params = body.get("rec_params", {})  # {rec_id: {pitchShift, reverb}}
+    rec_params = body.get("rec_params", {})
 
-    # 收集每个唱段的已选定录音
-    recordings_map = {}  # seg_id -> [rec, ...]
+    # 物化为纯 dict（后台线程不能持有 Session-bound ORM 对象）
+    song_dict = song_orm.to_dict(include_segments=False)
+    segments_dicts = [s.to_dict() for s in song_orm.segments]
+
+    recordings_map = {}
     missing_segs = []
-    for seg in segments:
-        seg_recs = [
-            r for r in RECORDINGS_DB.values()
-            if r["segment_id"] == seg["id"] and r.get("selected") and r.get("submitted")
-        ]
-        if not seg_recs:
+    for seg in segments_dicts:
+        seg_recs_orm = db.query(Recording).filter(
+            Recording.segment_id == seg["id"],
+            Recording.selected == True,
+            Recording.submitted == True,
+        ).all()
+        if not seg_recs_orm:
             missing_segs.append(f"#{seg['index']}")
-        else:
-            # 应用前端传来的参数
-            for r in seg_recs:
-                params = rec_params.get(r["id"], {})
-                r["_pitchShift"] = params.get("pitchShift", 0)
-                r["_reverb"] = params.get("reverb", 0)
+        seg_recs = []
+        for r in seg_recs_orm:
+            d = r.to_dict()
+            params = rec_params.get(r.id, {})
+            d["_pitchShift"] = params.get("pitchShift", 0)
+            d["_reverb"] = params.get("reverb", 0)
+            seg_recs.append(d)
         recordings_map[seg["id"]] = seg_recs
 
     if missing_segs:
@@ -3210,7 +3224,6 @@ async def admin_start_synthesis(song_id: str, request: Request):
             detail=f"以下唱段未选定录音: {', '.join(missing_segs[:5])}{'...' if len(missing_segs)>5 else ''}"
         )
 
-    # 初始化任务状态
     SYNTH_TASKS[song_id] = {
         "status": "running",
         "progress": 0,
@@ -3220,11 +3233,10 @@ async def admin_start_synthesis(song_id: str, request: Request):
         "error": None,
     }
 
-    # 启动后台线程
     thread = threading.Thread(
         target=_run_synthesis,
-        args=(song_id, song, segments, recordings_map),
-        daemon=True
+        args=(song_id, song_dict, segments_dicts, recordings_map),
+        daemon=True,
     )
     thread.start()
 
@@ -3244,78 +3256,79 @@ async def admin_synth_status(song_id: str, request: Request):
 # ============ 管理员 - 最终成曲管理 ============
 
 @router.get("/admin/finals")
-async def admin_get_finals(request: Request):
+async def admin_get_finals(request: Request, db: Session = Depends(get_db)):
     """获取所有最终成曲"""
     verify_admin(request)
-    finals = sorted(FINALS_DB.values(), key=lambda f: f.get("created_at", ""), reverse=True)
-    return {"success": True, "data": finals}
+    finals = db.query(Final).order_by(Final.created_at.desc()).all()
+    return {"success": True, "data": [f.to_dict() for f in finals]}
 
 
 @router.get("/admin/finals/{final_id}")
-async def admin_get_final(final_id: str, request: Request):
+async def admin_get_final(final_id: str, request: Request, db: Session = Depends(get_db)):
     """获取单个最终成曲详情"""
     verify_admin(request)
-    final = FINALS_DB.get(final_id)
+    final = db.get(Final, final_id)
     if not final:
         raise HTTPException(status_code=404, detail="成曲不存在")
-    return {"success": True, "data": final}
+    return {"success": True, "data": final.to_dict()}
 
 
 @router.post("/admin/finals/{final_id}/publish")
-async def admin_publish_final(final_id: str, request: Request):
+async def admin_publish_final(final_id: str, request: Request, db: Session = Depends(get_db)):
     """发布成曲"""
     verify_admin(request)
-    final = FINALS_DB.get(final_id)
+    final = db.get(Final, final_id)
     if not final:
         raise HTTPException(status_code=404, detail="成曲不存在")
-    final["published"] = True
-    final["published_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _save_db()
-    return {"success": True, "data": final}
+    final.published = True
+    final.published_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.commit()
+    db.refresh(final)
+    return {"success": True, "data": final.to_dict()}
 
 
 @router.post("/admin/finals/{final_id}/unpublish")
-async def admin_unpublish_final(final_id: str, request: Request):
+async def admin_unpublish_final(final_id: str, request: Request, db: Session = Depends(get_db)):
     """取消发布"""
     verify_admin(request)
-    final = FINALS_DB.get(final_id)
+    final = db.get(Final, final_id)
     if not final:
         raise HTTPException(status_code=404, detail="成曲不存在")
-    final["published"] = False
-    final.pop("published_at", None)
-    _save_db()
-    return {"success": True, "data": final}
+    final.published = False
+    final.published_at = None
+    db.commit()
+    db.refresh(final)
+    return {"success": True, "data": final.to_dict()}
 
 
 @router.delete("/admin/finals/{final_id}")
-async def admin_delete_final(final_id: str, request: Request):
+async def admin_delete_final(final_id: str, request: Request, db: Session = Depends(get_db)):
     """删除成曲及其所有关联文件"""
     verify_admin(request)
-    final = FINALS_DB.pop(final_id, None)
+    final = db.get(Final, final_id)
     if not final:
         raise HTTPException(status_code=404, detail="成曲不存在")
-    # 删除音频文件
-    audio_file = final.get("audio_file", "")
+    audio_file = final.audio_file or ""
+    meta_file = final.metadata_file or ""
+    recs_dir = final.recordings_dir or ""
+    db.delete(final)
+    db.commit()
+
     if audio_file:
         fp = os.path.join(FINALS_DIR, audio_file)
         if os.path.exists(fp):
             try: os.remove(fp)
-            except: pass
-    # 删除元数据文件
-    meta_file = final.get("metadata_file", "")
+            except Exception: pass
     if meta_file:
         fp = os.path.join(FINALS_DIR, meta_file)
         if os.path.exists(fp):
             try: os.remove(fp)
-            except: pass
-    # 删除录音备份目录
-    recs_dir = final.get("recordings_dir", "")
+            except Exception: pass
     if recs_dir:
         dp = os.path.join(FINALS_DIR, recs_dir)
         if os.path.exists(dp):
             try: shutil.rmtree(dp)
-            except: pass
-    _save_db()
+            except Exception: pass
     return {"success": True, "message": "成曲已删除"}
 
 
