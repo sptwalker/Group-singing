@@ -10,6 +10,9 @@ __pycache__/
 # downloaded tools / large binaries
 *.msi
 
+# local-only Dockerfile（aliyun 镜像源构建，不进远程）
+youdoo-sing/Dockerfile.aliyun
+
 # test fixtures (audio not for distribution)
 /测试音乐/
 
