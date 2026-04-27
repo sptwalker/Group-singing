@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     # Redis（保留供未来使用，目前不依赖）
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # 系统邮件配置（SMTP 地址和密码后续在 .env 中配置）
+    MAIL_FROM: str = "sing@youdoo.com"
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 465
+    SMTP_USER: str = "sing@youdoo.com"
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_SSL: bool = True
+
     # 文件存储配置
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50MB

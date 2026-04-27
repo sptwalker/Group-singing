@@ -103,6 +103,25 @@ html, body {
 }
 .btn-login:hover { background: #4338ca; }
 .btn-login:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-register-link {
+    width: 100%;
+    margin-top: 12px;
+    padding: 8px;
+    background: transparent;
+    border: none;
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color var(--transition);
+}
+.btn-register-link:hover {
+    color: #4338ca;
+    text-decoration: underline;
+}
+.register-form {
+    margin-top: 0;
+}
 
 /* ===== 主布局 ===== */
 .app-layout {
@@ -216,6 +235,26 @@ html, body {
     cursor: pointer;
     color: var(--text);
     padding: 4px;
+}
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.btn-account-settings {
+    padding: 5px 12px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+.btn-account-settings:hover {
+    color: var(--primary);
+    border-color: var(--primary-light);
+    background: var(--primary-bg);
 }
 .admin-name {
     font-size: 13px;
@@ -1608,6 +1647,48 @@ tbody tr:last-child td { border-bottom: none; }
 .final-progress-track:hover { height:6px; }
 .final-progress-fill { height:100%; background:linear-gradient(90deg, var(--primary), var(--primary-light)); border-radius:2px; width:0%; transition:none; }
 .final-time-label { font-size:12px; color:var(--text-secondary); font-family:monospace; white-space:nowrap; min-width:90px; text-align:right; }
+
+/* ===== 超级管理员模块 ===== */
+.super-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.super-form-card {
+    margin-bottom: 18px;
+}
+.super-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--text);
+    margin-right: 18px;
+}
+.super-song-limit {
+    width: 76px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.super-table-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 260px;
+}
+.super-metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-light);
+}
+.super-metric-row:last-child { border-bottom: none; }
+.muted {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
 
 /* ===== 响应式 ===== */
 @media (max-width: 768px) {
