@@ -27,5 +27,6 @@ def get_db():
 def init_db() -> None:
     """启动时调用：自动建表（开发用，生产建议改 alembic 迁移）"""
     # 必须先 import 所有 model 让 Base.metadata 收集到表
-    from app.models import song, segment, recording, user, free_task, final  # noqa: F401
+    from app.models import song, segment, recording, user, free_task, final, admin  # noqa: F401
     Base.metadata.create_all(bind=engine)
+

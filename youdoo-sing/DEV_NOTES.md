@@ -483,3 +483,35 @@ python -m http.server 3000 --directory frontend/public
 11. **Final.song_id 不加 FK**：删除歌曲后保留历史成曲音频，`admin_delete_song` 主动清理 Recording 与 Final 行
 12. **Cascade 删除**：`Song.segments` / `Segment.claims` / `Song.free_tasks` 都配置了 `cascade="all, delete-orphan"`；删除 Song 时这些子表会自动清理，但 `recordings` 与 `finals` 仍需手动处理（无 FK）
 13. **db.json 已退役**：启动时不再读取，相关 `_save_db()` / `_load_db()` 已全部删除；保留 `data/db.json` 仅供迁移脚本使用
+
+## 十七、2026-04-27 管理员系统检查与单元测试
+
+### 检查范围
+- 后端多租户/管理员核心：`backend/app/api/routes.py`、`backend/app/core/multitenant.py`、`backend/app/core/database.py`、`backend/app/core/config.py`
+- ORM 模型：`backend/app/models/admin.py`、`song.py`、`segment.py`、`recording.py`、`user.py`、`free_task.py`、`final.py`、`__init__.py`
+- 重点验证：超级管理员初始化、注册开关、授权码、冻结/解冻、重置密码、审计日志、普通管理员歌曲租户隔离、超级管理员全局可见性
+
+### 新增测试
+- 新增 `backend/tests/test_admin_system.py`
+- 测试使用 SQLite 文件库 `backend/tests/admin_system_test.sqlite3`，通过 `DATABASE_URL` 临时覆盖数据库连接
+- 每个测试用例执行前 `drop_all/create_all` 并调用 `bootstrap_multitenant()` 初始化默认系统数据
+
+### 覆盖用例
+1. `test_super_admin_seed_login_and_check`：验证 `administrator / 888888` 初始化、登录、`/api/admin/check`、错误密码拒绝
+2. `test_registration_settings_invite_code_and_audit_log`：验证默认注册状态、超级管理员修改注册设置、生成授权码、授权码注册普通管理员、授权码不可复用、审计日志写入
+3. `test_freeze_unfreeze_and_reset_password`：验证冻结管理员、冻结后旧 token 失效、冻结后禁止登录、解冻、重置密码为 `123456`
+4. `test_admin_song_tenant_isolation_and_super_visibility`：验证普通管理员只能看到自己的歌曲，跨租户访问返回 404，超级管理员可查看全部歌曲
+
+### 测试注意事项
+- Windows 下 SQLite 文件在 SQLAlchemy 连接未释放时不能立即删除；测试 teardown 改为 `drop_all()` 后 `engine.dispose()`，不在每个用例结束时删除数据库文件
+- `requirements.txt` 已补充 `pytest>=8.3.0` 作为测试依赖
+
+### 测试结果
+- 运行命令：`powershell -NoProfile -Command "cd 'd:/Users/walker/Documents/walker/Videcode/group-singing/youdoo-sing/backend'; $env:PYTHONPATH='d:/Users/walker/Documents/walker/Videcode/group-singing/youdoo-sing/backend/venv/Lib/site-packages'; python -m pytest tests/test_admin_system.py -q"`
+- 结果：`4 passed, 1 warning in 3.22s`
+- 非阻塞警告：`app/core/config.py` 使用 Pydantic V1 风格 `class Config`，后续可迁移为 `ConfigDict`
+
+### 后续风险点
+- `users.owner_admin_id` 与“微信用户全局保留、录音按管理员隔离”的目标存在潜在冲突，后续应调整用户/参与记录边界
+- 加密任务链接尚未实现，用户端 `/api/songs` 仍可能枚举已发布任务
+- 录音提交、点赞、上传文件访问、成曲文件访问还需要继续加固任务权限与租户边界

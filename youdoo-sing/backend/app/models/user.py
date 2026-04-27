@@ -7,6 +7,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(String(64), primary_key=True, index=True)
+    owner_admin_id = Column(String(32), nullable=True, index=True)
     nickname = Column(String(255), nullable=False)
     avatar = Column(String(512), nullable=True)
     auth_provider = Column(String(32), nullable=True)
@@ -19,6 +20,7 @@ class User(Base):
     def to_dict(self) -> dict:
         d = {
             "id": self.id,
+            "owner_admin_id": self.owner_admin_id,
             "nickname": self.nickname,
             "avatar": self.avatar or "",
         }

@@ -7,6 +7,7 @@ class Final(Base):
     __tablename__ = "finals"
 
     id = Column(String(32), primary_key=True, index=True)
+    owner_admin_id = Column(String(32), nullable=True, index=True)
     song_id = Column(String(32), nullable=False, index=True)
     song_title = Column(String(255), nullable=True)
     song_artist = Column(String(255), nullable=True)
@@ -24,6 +25,7 @@ class Final(Base):
     def to_dict(self) -> dict:
         d = {
             "id": self.id,
+            "owner_admin_id": self.owner_admin_id,
             "song_id": self.song_id,
             "song_title": self.song_title or "",
             "song_artist": self.song_artist or "",

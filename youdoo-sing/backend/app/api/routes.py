@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Query, Body, Request, Depends
-from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse, FileResponse
 from typing import Optional, List
 import uuid
 import os
@@ -20,7 +20,8 @@ from contextlib import contextmanager
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func as sql_func
 from app.core.database import get_db, SessionLocal
-from app.models import Song, Segment, SegmentClaim, Recording, User, FreeTask, Final
+from app.core.multitenant import hash_password, verify_password, get_setting, set_setting, log_audit, new_id, now_str
+from app.models import Song, Segment, SegmentClaim, Recording, User, FreeTask, Final, AdminUser, AdminInviteCode, SystemSetting, AuditLog
 
 # OpenAI API 配置（用于 DeepSeek 等兼容接口）
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -32,11 +33,9 @@ WECHAT_OAUTH_REDIRECT_URI = os.environ.get("WECHAT_OAUTH_REDIRECT_URI", "").stri
 
 router = APIRouter(prefix="/api", tags=["api"])
 
-# ============ 管理员配置 ============
-ADMIN_ACCOUNTS = {
-    "admin": hashlib.sha256("youdoo2026".encode()).hexdigest(),
-}
-ADMIN_TOKENS = {}  # token -> {username, login_time}
+# ============ 管理员会话 ============
+ADMIN_TOKENS = {}  # token -> {id, username, role, login_time}
+
 
 MUSIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "music"))
 UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
@@ -81,6 +80,7 @@ def _new_segment_orm_from_dict(d: dict) -> Segment:
     """从 dict 创建 Segment ORM 实例（用于 _resegment_by_lrc / _split_and_analyze 的产物入库）"""
     return Segment(
         id=d["id"],
+        owner_admin_id=d.get("owner_admin_id"),
         song_id=d["song_id"],
         index=d.get("index", 0),
         start_time=d.get("start_time", 0.0),
@@ -1406,21 +1406,27 @@ def _calc_completion_orm(db: Session, song: Song) -> float:
     submitted_seg_ids = {
         r.segment_id for r in db.query(Recording.segment_id)
         .filter(Recording.song_id == song.id, Recording.submitted == True,
-                Recording.segment_id.in_(seg_ids)).all()
+                Recording.segment_id.in_(seg_ids),
+                Recording.owner_admin_id == song.owner_admin_id).all()
     }
     done = sum(1 for s in segs if s.status == "completed" or s.id in submitted_seg_ids)
     return round(done / len(segs) * 100, 1)
 
 
-def _calc_participant_count_orm(db: Session, song_id: str) -> int:
-    rows = db.query(Recording.user_id).filter(
-        Recording.song_id == song_id, Recording.submitted == True
-    ).distinct().all()
+def _calc_participant_count_orm(db: Session, song_id: str, owner_admin_id: Optional[str] = None) -> int:
+    q = db.query(Recording.user_id).filter(Recording.song_id == song_id, Recording.submitted == True)
+    if owner_admin_id is not None:
+        q = q.filter(Recording.owner_admin_id == owner_admin_id)
+    rows = q.distinct().all()
     return len(rows)
 
 
-def _published_final_brief(db: Session, song_id: str, full: bool = False) -> Optional[dict]:
-    f = db.query(Final).filter(Final.song_id == song_id, Final.published == True).first()
+def _published_final_brief(db: Session, song_id: str, full: bool = False, owner_admin_id: Optional[str] = None) -> Optional[dict]:
+    q = db.query(Final).filter(Final.song_id == song_id, Final.published == True)
+    if owner_admin_id is not None:
+        q = q.filter(Final.owner_admin_id == owner_admin_id)
+    f = q.first()
+
     if not f:
         return None
     brief = {"id": f.id, "audio_url": f.audio_url or "", "duration": f.duration or 0}
@@ -1437,10 +1443,14 @@ def _published_final_brief(db: Session, song_id: str, full: bool = False) -> Opt
 
 @router.get("/songs")
 async def get_songs(db: Session = Depends(get_db)):
-    """获取所有已发布任务的歌曲"""
+    """获取所有已发布且所属管理员可用的歌曲"""
     songs_orm = db.query(Song).filter(Song.task_published == True).all()
     songs = []
     for s in songs_orm:
+        if s.owner_admin_id:
+            admin = db.get(AdminUser, s.owner_admin_id)
+            if not admin or admin.status != "active" or admin.freeze_tasks:
+                continue
         songs.append({
             "id": s.id,
             "title": s.title,
@@ -1448,23 +1458,21 @@ async def get_songs(db: Session = Depends(get_db)):
             "duration": s.duration,
             "audio_url": s.audio_url,
             "segment_count": s.segment_count,
-            "participant_count": _calc_participant_count_orm(db, s.id),
+            "participant_count": _calc_participant_count_orm(db, s.id, s.owner_admin_id),
             "completion": _calc_completion_orm(db, s),
-            "published_final": _published_final_brief(db, s.id, full=False),
+            "published_final": _published_final_brief(db, s.id, full=False, owner_admin_id=s.owner_admin_id),
         })
     return {"success": True, "data": songs}
 
 
 @router.get("/songs/{song_id}")
 async def get_song(song_id: str, db: Session = Depends(get_db)):
-    """获取歌曲详情（含唱段）"""
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    """获取已发布任务歌曲详情（含唱段）"""
+    song = _get_active_song_for_user(db, song_id)
     data = song.to_dict(include_segments=True)
-    data["published_final"] = _published_final_brief(db, song_id, full=True)
+    data["published_final"] = _published_final_brief(db, song_id, full=True, owner_admin_id=song.owner_admin_id)
     data["completion"] = _calc_completion_orm(db, song)
-    data["participant_count"] = _calc_participant_count_orm(db, song_id)
+    data["participant_count"] = _calc_participant_count_orm(db, song_id, song.owner_admin_id)
     return {"success": True, "data": data}
 
 
@@ -1472,11 +1480,10 @@ async def get_song(song_id: str, db: Session = Depends(get_db)):
 
 @router.get("/songs/{song_id}/segments")
 async def get_segments(song_id: str, db: Session = Depends(get_db)):
-    """获取歌曲所有唱段"""
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    """获取已发布任务歌曲所有唱段"""
+    song = _get_active_song_for_user(db, song_id)
     return {"success": True, "data": [s.to_dict() for s in song.segments]}
+
 
 
 @router.post("/segments/{segment_id}/claim")
@@ -1490,6 +1497,7 @@ async def claim_segment(
     seg = db.get(Segment, segment_id)
     if not seg:
         raise HTTPException(status_code=404, detail="唱段不存在")
+    _get_active_song_for_user(db, seg.song_id)
     if seg.status == "completed":
         raise HTTPException(status_code=400, detail="该唱段已完成")
 
@@ -1500,6 +1508,7 @@ async def claim_segment(
 
     claim = SegmentClaim(
         id=str(uuid.uuid4())[:8],
+        owner_admin_id=seg.owner_admin_id,
         segment_id=segment_id,
         user_id=user_id,
         user_name=user_name,
@@ -1536,9 +1545,8 @@ async def random_claim(
     db: Session = Depends(get_db),
 ):
     """随机认领一个可唱段"""
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    song = _get_active_song_for_user(db, song_id)
+
 
     import random
     available = [s for s in song.segments if s.status != "completed"]
@@ -1552,6 +1560,7 @@ async def random_claim(
     if not any(c.user_id == user_id for c in seg.claims):
         claim = SegmentClaim(
             id=str(uuid.uuid4())[:8],
+            owner_admin_id=seg.owner_admin_id,
             segment_id=seg.id,
             user_id=user_id,
             user_name=user_name,
@@ -1615,8 +1624,18 @@ async def upload_recording(
     if not avatar:
         avatar = f"https://api.dicebear.com/7.x/fun-emoji/svg?seed={user_name}"
 
+    seg = db.get(Segment, segment_id)
+    song = db.get(Song, song_id)
+    if not seg or not song or seg.song_id != song_id:
+        raise HTTPException(status_code=404, detail="唱段不存在")
+    if song.owner_admin_id:
+        admin = db.get(AdminUser, song.owner_admin_id)
+        if not admin or admin.status != "active" or admin.freeze_tasks:
+            raise HTTPException(status_code=404, detail="任务不可用")
+
     rec = Recording(
         id=rec_id,
+        owner_admin_id=song.owner_admin_id,
         segment_id=segment_id,
         song_id=song_id,
         user_id=user_id,
@@ -1665,10 +1684,8 @@ async def submit_recording(recording_id: str, db: Session = Depends(get_db)):
 @router.post("/segments/{segment_id}/complete")
 async def mark_segment_completed(segment_id: str, request: Request, db: Session = Depends(get_db)):
     """管理员标记唱段为已完成"""
-    verify_admin(request)
-    seg = db.get(Segment, segment_id)
-    if not seg:
-        raise HTTPException(status_code=404, detail="唱段不存在")
+    admin = verify_admin(request, db)
+    seg = _get_owned_segment(db, segment_id, admin)
 
     seg.status = "completed"
 
@@ -1685,10 +1702,8 @@ async def mark_segment_completed(segment_id: str, request: Request, db: Session 
 @router.post("/segments/{segment_id}/reopen")
 async def reopen_segment(segment_id: str, request: Request, db: Session = Depends(get_db)):
     """管理员重新开放已完成唱段"""
-    verify_admin(request)
-    seg = db.get(Segment, segment_id)
-    if not seg:
-        raise HTTPException(status_code=404, detail="唱段不存在")
+    admin = verify_admin(request, db)
+    seg = _get_owned_segment(db, segment_id, admin)
 
     seg.status = "claimed" if (seg.claim_count or 0) > 0 else "unassigned"
 
@@ -1705,10 +1720,8 @@ async def reopen_segment(segment_id: str, request: Request, db: Session = Depend
 @router.delete("/recordings/{recording_id}")
 async def delete_recording(recording_id: str, request: Request, db: Session = Depends(get_db)):
     """删除录音"""
-    verify_admin(request)
-    rec = db.get(Recording, recording_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="录音不存在")
+    admin = verify_admin(request, db)
+    rec = _get_owned_recording(db, recording_id, admin)
     audio_url = rec.audio_url or ""
     db.delete(rec)
     db.commit()
@@ -1732,9 +1745,14 @@ async def get_recordings(
     """获取录音列表（仅 submitted）"""
     q = db.query(Recording).filter(Recording.submitted == True)
     if song_id:
-        q = q.filter(Recording.song_id == song_id)
+        song = _get_active_song_for_user(db, song_id)
+        q = q.filter(Recording.song_id == song_id, Recording.owner_admin_id == song.owner_admin_id)
     if segment_id:
-        q = q.filter(Recording.segment_id == segment_id)
+        seg = db.get(Segment, segment_id)
+        if not seg:
+            raise HTTPException(status_code=404, detail="唱段不存在")
+        _get_active_song_for_user(db, seg.song_id)
+        q = q.filter(Recording.segment_id == segment_id, Recording.owner_admin_id == seg.owner_admin_id)
     return {"success": True, "data": [r.to_dict() for r in q.all()]}
 
 
@@ -1795,36 +1813,395 @@ async def serve_upload(filename: str):
 
 # ============ 管理员鉴权 ============
 
-def verify_admin(request: Request):
-    """验证管理员 token"""
+def verify_admin(request: Request, db: Session = None):
+    """验证管理员 token，兼容旧调用方式。"""
     auth = request.headers.get("Authorization", "")
     token = auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
-    if not token or token not in ADMIN_TOKENS:
+    session = ADMIN_TOKENS.get(token)
+    if not token or not session:
         raise HTTPException(status_code=401, detail="未登录或登录已过期")
-    return ADMIN_TOKENS[token]
+    if db is not None:
+        admin = db.get(AdminUser, session.get("id"))
+        if not admin or admin.status in ("frozen", "deleted"):
+            ADMIN_TOKENS.pop(token, None)
+            raise HTTPException(status_code=403, detail="账户已被冻结或删除")
+        session.update(admin.to_dict())
+    return session
+
+
+def require_super_admin(request: Request, db: Session):
+    admin = verify_admin(request, db)
+    if admin.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="需要超级管理员权限")
+    return admin
+
+
+def _admin_public_data(admin: AdminUser) -> dict:
+    return {
+        "id": admin.id,
+        "username": admin.username,
+        "display_name": admin.display_name or admin.username,
+        "email": admin.email or "",
+        "role": admin.role,
+        "status": admin.status,
+        "song_limit": admin.song_limit,
+        "freeze_tasks": bool(admin.freeze_tasks),
+    }
+
+
+def _admin_owner_id(admin: dict) -> Optional[str]:
+    return None if admin.get("role") == "super_admin" else admin.get("id")
+
+
+def _filter_owner(query, model, admin: dict):
+    owner_id = _admin_owner_id(admin)
+    return query if not owner_id else query.filter(model.owner_admin_id == owner_id)
+
+
+def _get_owned_song(db: Session, song_id: str, admin: dict) -> Song:
+    q = db.query(Song).filter(Song.id == song_id)
+    q = _filter_owner(q, Song, admin)
+    song = q.first()
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲不存在")
+    return song
+
+
+def _get_owned_segment(db: Session, segment_id: str, admin: dict) -> Segment:
+    q = db.query(Segment).filter(Segment.id == segment_id)
+    q = _filter_owner(q, Segment, admin)
+    seg = q.first()
+    if not seg:
+        raise HTTPException(status_code=404, detail="唱段不存在")
+    return seg
+
+
+def _get_owned_recording(db: Session, recording_id: str, admin: dict) -> Recording:
+    q = db.query(Recording).filter(Recording.id == recording_id)
+    q = _filter_owner(q, Recording, admin)
+    rec = q.first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="录音不存在")
+    return rec
+
+
+def _get_owned_final(db: Session, final_id: str, admin: dict) -> Final:
+    q = db.query(Final).filter(Final.id == final_id)
+    q = _filter_owner(q, Final, admin)
+    final = q.first()
+    if not final:
+        raise HTTPException(status_code=404, detail="成曲不存在")
+    return final
+
+
+def _get_active_song_for_user(db: Session, song_id: str) -> Song:
+    song = db.get(Song, song_id)
+    if not song or not song.task_published:
+        raise HTTPException(status_code=404, detail="歌曲不存在或任务未发布")
+    if song.owner_admin_id:
+        admin = db.get(AdminUser, song.owner_admin_id)
+        if not admin or admin.status != "active" or admin.freeze_tasks:
+            raise HTTPException(status_code=404, detail="任务不可用")
+    return song
+
+
+
+
+
+@router.get("/admin/register-status")
+async def admin_register_status(db: Session = Depends(get_db)):
+    return {"success": True, "data": {
+        "enabled": bool(get_setting(db, "admin_registration_enabled", False)),
+        "invite_required": bool(get_setting(db, "admin_registration_invite_required", True)),
+    }}
+
+
+@router.post("/admin/register")
+async def admin_register(
+    username: str = Body(...),
+    password: str = Body(...),
+    email: str = Body(...),
+    display_name: str = Body(""),
+    invite_code: str = Body(""),
+    db: Session = Depends(get_db),
+):
+    if not get_setting(db, "admin_registration_enabled", False):
+        raise HTTPException(status_code=403, detail="管理员注册暂未开放")
+    invite_required = bool(get_setting(db, "admin_registration_invite_required", True))
+    username = username.strip()
+    email = email.strip()
+    if not username or len(username) < 3:
+        raise HTTPException(status_code=400, detail="用户名至少3个字符")
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="请输入有效邮箱")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="密码至少6位")
+    if db.query(AdminUser).filter(AdminUser.username == username).first():
+        raise HTTPException(status_code=400, detail="用户名已存在")
+    code_row = None
+    if invite_required:
+        code_row = db.query(AdminInviteCode).filter(AdminInviteCode.code == invite_code.strip()).first()
+        if not code_row or code_row.status != "unused":
+            raise HTTPException(status_code=400, detail="授权码无效或已使用")
+    admin = AdminUser(
+        id=new_id("admin"),
+        username=username,
+        password_hash=hash_password(password),
+        display_name=display_name.strip() or username,
+        email=email,
+        email_confirmed=True,
+        role="admin",
+        status="active",
+        song_limit=int(get_setting(db, "default_song_limit", 5)),
+        created_at=now_str(),
+    )
+    db.add(admin)
+    if code_row:
+        code_row.status = "used"
+        code_row.used_by = admin.id
+        code_row.used_at = now_str()
+    log_audit(db, {"id": admin.id, "username": admin.username}, "admin_register", "admin_user", admin.id)
+    db.commit()
+    return {"success": True, "data": _admin_public_data(admin)}
 
 
 @router.post("/admin/login")
-async def admin_login(username: str = Body(...), password: str = Body(...)):
+async def admin_login(username: str = Body(...), password: str = Body(...), db: Session = Depends(get_db)):
     """管理员登录"""
-    pwd_hash = hashlib.sha256(password.encode()).hexdigest()
-    if username not in ADMIN_ACCOUNTS or ADMIN_ACCOUNTS[username] != pwd_hash:
+    admin = db.query(AdminUser).filter(AdminUser.username == username.strip()).first()
+    if not admin or not verify_password(password, admin.password_hash):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
-    token = hashlib.sha256(f"{username}{time.time()}{uuid.uuid4()}".encode()).hexdigest()[:32]
-    ADMIN_TOKENS[token] = {"username": username, "login_time": time.time()}
-    return {"success": True, "data": {"token": token, "username": username}}
+    if admin.status == "deleted":
+        raise HTTPException(status_code=403, detail="账户已删除")
+    if admin.status == "frozen":
+        raise HTTPException(status_code=403, detail="账户已冻结")
+    admin.last_login_at = now_str()
+    token = hashlib.sha256(f"{admin.id}{time.time()}{uuid.uuid4()}".encode()).hexdigest()[:32]
+    ADMIN_TOKENS[token] = {**_admin_public_data(admin), "login_time": time.time()}
+    log_audit(db, admin, "admin_login", "admin_user", admin.id)
+    db.commit()
+    return {"success": True, "data": {"token": token, **_admin_public_data(admin)}}
 
 
 @router.get("/admin/check")
-async def admin_check(request: Request):
+async def admin_check(request: Request, db: Session = Depends(get_db)):
     """检查管理员登录状态"""
-    admin = verify_admin(request)
+    admin = verify_admin(request, db)
     return {"success": True, "data": admin}
+
+
+
+@router.get("/super/admins")
+async def super_list_admins(request: Request, db: Session = Depends(get_db)):
+    super_admin = require_super_admin(request, db)
+    admins = db.query(AdminUser).order_by(AdminUser.created_at.desc()).all()
+    data = []
+    for a in admins:
+        d = a.to_dict()
+        d.update({
+            "song_count": int(db.query(sql_func.count(Song.id)).filter(Song.owner_admin_id == a.id).scalar() or 0),
+            "recording_count": int(db.query(sql_func.count(Recording.id)).filter(Recording.owner_admin_id == a.id).scalar() or 0),
+            "final_count": int(db.query(sql_func.count(Final.id)).filter(Final.owner_admin_id == a.id).scalar() or 0),
+        })
+        data.append(d)
+    log_audit(db, super_admin, "super_list_admins", "admin_user", "*")
+    db.commit()
+    return {"success": True, "data": data}
+
+
+@router.post("/super/admins/{admin_id}/freeze")
+async def super_freeze_admin(admin_id: str, request: Request, freeze_tasks: bool = Body(False), db: Session = Depends(get_db)):
+    super_admin = require_super_admin(request, db)
+    admin = db.get(AdminUser, admin_id)
+    if not admin or admin.role == "super_admin":
+        raise HTTPException(status_code=404, detail="管理员不存在或不可冻结")
+    admin.status = "frozen"
+    admin.freeze_tasks = bool(freeze_tasks)
+    for token, session in list(ADMIN_TOKENS.items()):
+        if session.get("id") == admin.id:
+            ADMIN_TOKENS.pop(token, None)
+    log_audit(db, super_admin, "super_freeze_admin", "admin_user", admin.id, {"freeze_tasks": freeze_tasks})
+    db.commit()
+    return {"success": True, "data": admin.to_dict()}
+
+
+@router.post("/super/admins/{admin_id}/unfreeze")
+async def super_unfreeze_admin(admin_id: str, request: Request, db: Session = Depends(get_db)):
+    super_admin = require_super_admin(request, db)
+    admin = db.get(AdminUser, admin_id)
+    if not admin or admin.role == "super_admin":
+        raise HTTPException(status_code=404, detail="管理员不存在或不可解冻")
+    admin.status = "active"
+    admin.freeze_tasks = False
+    log_audit(db, super_admin, "super_unfreeze_admin", "admin_user", admin.id)
+    db.commit()
+    return {"success": True, "data": admin.to_dict()}
+
+
+@router.post("/super/admins/{admin_id}/reset-password")
+async def super_reset_admin_password(admin_id: str, request: Request, db: Session = Depends(get_db)):
+    super_admin = require_super_admin(request, db)
+    admin = db.get(AdminUser, admin_id)
+    if not admin or admin.role == "super_admin":
+        raise HTTPException(status_code=404, detail="管理员不存在或不可重置")
+    admin.password_hash = hash_password("123456")
+    for token, session in list(ADMIN_TOKENS.items()):
+        if session.get("id") == admin.id:
+            ADMIN_TOKENS.pop(token, None)
+    log_audit(db, super_admin, "super_reset_admin_password", "admin_user", admin.id)
+    db.commit()
+    return {"success": True, "message": "密码已重置为123456"}
+
+
+@router.delete("/super/admins/{admin_id}")
+async def super_soft_delete_admin(admin_id: str, request: Request, db: Session = Depends(get_db)):
+    super_admin = require_super_admin(request, db)
+    admin = db.get(AdminUser, admin_id)
+    if not admin or admin.role == "super_admin":
+        raise HTTPException(status_code=404, detail="管理员不存在或不可删除")
+    admin.status = "deleted"
+    admin.deleted_at = now_str()
+    admin.freeze_tasks = True
+    for token, session in list(ADMIN_TOKENS.items()):
+        if session.get("id") == admin.id:
+            ADMIN_TOKENS.pop(token, None)
+    log_audit(db, super_admin, "super_soft_delete_admin", "admin_user", admin.id)
+    db.commit()
+    return {"success": True, "data": admin.to_dict()}
+
+
+@router.post("/super/admins/{admin_id}/restore")
+async def super_restore_admin(admin_id: str, request: Request, db: Session = Depends(get_db)):
+    super_admin = require_super_admin(request, db)
+    admin = db.get(AdminUser, admin_id)
+    if not admin or admin.role == "super_admin":
+        raise HTTPException(status_code=404, detail="管理员不存在或不可恢复")
+    admin.status = "active"
+    admin.deleted_at = None
+    admin.freeze_tasks = False
+    log_audit(db, super_admin, "super_restore_admin", "admin_user", admin.id)
+    db.commit()
+    return {"success": True, "data": admin.to_dict()}
+
+
+@router.delete("/super/admins/{admin_id}/purge-data")
+async def super_purge_admin_data(admin_id: str, request: Request, db: Session = Depends(get_db)):
+    super_admin = require_super_admin(request, db)
+    admin = db.get(AdminUser, admin_id)
+    if not admin or admin.status != "deleted" or admin.role == "super_admin":
+        raise HTTPException(status_code=400, detail="只能清理已软删除的普通管理员")
+    song_ids = [s.id for s in db.query(Song).filter(Song.owner_admin_id == admin_id).all()]
+    rec_files = [os.path.basename(r.audio_url or "") for r in db.query(Recording).filter(Recording.owner_admin_id == admin_id).all()]
+    final_rows = db.query(Final).filter(Final.owner_admin_id == admin_id).all()
+    for model in (Recording, SegmentClaim, FreeTask, Segment, Final, Song):
+        db.query(model).filter(model.owner_admin_id == admin_id).delete(synchronize_session=False)
+    db.delete(admin)
+    db.commit()
+    for fname in rec_files:
+        if fname:
+            fp = os.path.join(UPLOAD_DIR, fname)
+            if os.path.exists(fp):
+                try: os.remove(fp)
+                except Exception: pass
+    for sid in song_ids:
+        for fp in [os.path.join(UPLOAD_DIR, f"{sid}.mp3"), os.path.join(UPLOAD_DIR, f"{sid}.wav")]:
+            if os.path.exists(fp):
+                try: os.remove(fp)
+                except Exception: pass
+    for f in final_rows:
+        for name in (f.audio_file, f.metadata_file):
+            if name and os.path.exists(os.path.join(FINALS_DIR, name)):
+                try: os.remove(os.path.join(FINALS_DIR, name))
+                except Exception: pass
+        if f.recordings_dir and os.path.exists(os.path.join(FINALS_DIR, f.recordings_dir)):
+            try: shutil.rmtree(os.path.join(FINALS_DIR, f.recordings_dir))
+            except Exception: pass
+    log_audit(db, super_admin, "super_purge_admin_data", "admin_user", admin_id)
+    db.commit()
+    return {"success": True, "message": "软删除账户数据已清理"}
+
+
+@router.get("/super/settings")
+async def super_get_settings(request: Request, db: Session = Depends(get_db)):
+    require_super_admin(request, db)
+    rows = db.query(SystemSetting).order_by(SystemSetting.key).all()
+    return {"success": True, "data": {r.key: r.to_dict() for r in rows}}
+
+
+@router.put("/super/settings")
+async def super_update_settings(request: Request, db: Session = Depends(get_db)):
+    super_admin = require_super_admin(request, db)
+    body = await request.json()
+    allowed = {
+        "admin_registration_enabled": "bool",
+        "admin_registration_invite_required": "bool",
+        "default_song_limit": "int",
+        "final_mix_enabled": "bool",
+    }
+    for key, value in body.items():
+        if key in allowed:
+            set_setting(db, key, value, allowed[key], updated_by=super_admin.get("id"))
+    log_audit(db, super_admin, "super_update_settings", "system_settings", "*", body)
+    db.commit()
+    return {"success": True}
+
+
+@router.post("/super/invite-codes")
+async def super_create_invite_code(request: Request, db: Session = Depends(get_db)):
+    super_admin = require_super_admin(request, db)
+    code = f"YDS-{uuid.uuid4().hex[:4].upper()}-{uuid.uuid4().hex[:4].upper()}"
+    row = AdminInviteCode(id=new_id("code"), code=code, created_by=super_admin.get("id"), status="unused", created_at=now_str())
+    db.add(row)
+    log_audit(db, super_admin, "super_create_invite_code", "invite_code", code)
+    db.commit()
+    return {"success": True, "data": row.to_dict()}
+
+
+@router.get("/super/invite-codes")
+async def super_list_invite_codes(request: Request, db: Session = Depends(get_db)):
+    require_super_admin(request, db)
+    rows = db.query(AdminInviteCode).order_by(AdminInviteCode.created_at.desc()).all()
+    return {"success": True, "data": [r.to_dict() for r in rows]}
+
+
+@router.get("/super/stats")
+async def super_stats(request: Request, db: Session = Depends(get_db)):
+    require_super_admin(request, db)
+    server = {}
+    try:
+        import psutil
+        server = {
+            "cpu_percent": psutil.cpu_percent(interval=0.1),
+            "memory_percent": psutil.virtual_memory().percent,
+            "disk_percent": psutil.disk_usage(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))).percent,
+        }
+    except Exception as e:
+        server = {"error": str(e)}
+    data = {
+        "admin_count": int(db.query(sql_func.count(AdminUser.id)).scalar() or 0),
+        "active_admin_count": int(db.query(sql_func.count(AdminUser.id)).filter(AdminUser.status == "active").scalar() or 0),
+        "song_count": int(db.query(sql_func.count(Song.id)).scalar() or 0),
+        "recording_count": int(db.query(sql_func.count(Recording.id)).scalar() or 0),
+        "final_count": int(db.query(sql_func.count(Final.id)).scalar() or 0),
+        "user_count": int(db.query(sql_func.count(User.id)).scalar() or 0),
+        "server": server,
+    }
+    return {"success": True, "data": data}
+
+
+@router.get("/super/finals")
+async def super_get_finals(request: Request, db: Session = Depends(get_db)):
+    require_super_admin(request, db)
+    finals = db.query(Final).order_by(Final.created_at.desc()).all()
+    return {"success": True, "data": [f.to_dict() for f in finals]}
+
+
 
 
 # ============ 管理员 - 歌曲管理 ============
 
 ALLOWED_AUDIO_EXT = {'.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma'}
+
 
 @router.post("/admin/songs/upload")
 async def admin_upload_song(
@@ -1835,7 +2212,12 @@ async def admin_upload_song(
     db: Session = Depends(get_db),
 ):
     """上传新歌曲：保存音频文件 → 读取时长（不进行切分，等歌词上传后再切分）"""
-    verify_admin(request)
+    admin = verify_admin(request, db)
+
+    if admin.get("role") != "super_admin":
+        current_count = db.query(sql_func.count(Song.id)).filter(Song.owner_admin_id == admin.get("id")).scalar() or 0
+        if current_count >= int(admin.get("song_limit") or 5):
+            raise HTTPException(status_code=400, detail=f"歌曲库已达上限({admin.get('song_limit') or 5}首)")
 
     _, ext = os.path.splitext(audio.filename or "")
     ext = ext.lower()
@@ -1858,6 +2240,7 @@ async def admin_upload_song(
     audio_url = f"/api/uploads/{safe_filename}"
     song = Song(
         id=song_id,
+        owner_admin_id=_admin_owner_id(admin),
         title=title.strip() or os.path.splitext(audio.filename or "未命名")[0],
         artist=artist.strip(),
         duration=duration,
@@ -1882,11 +2265,11 @@ async def admin_upload_song(
 @router.get("/admin/songs")
 async def admin_get_songs(request: Request, db: Session = Depends(get_db)):
     """获取所有歌曲（含完整信息）"""
-    verify_admin(request)
-    songs_orm = db.query(Song).all()
-    rec_counts = dict(
-        db.query(Recording.song_id, sql_func.count(Recording.id)).group_by(Recording.song_id).all()
-    )
+    admin = verify_admin(request, db)
+    songs_orm = _filter_owner(db.query(Song), Song, admin).all()
+    rec_q = db.query(Recording.song_id, sql_func.count(Recording.id))
+    rec_q = _filter_owner(rec_q, Recording, admin)
+    rec_counts = dict(rec_q.group_by(Recording.song_id).all())
     songs = []
     for s in songs_orm:
         audio_file = s.audio_file or ""
@@ -1920,10 +2303,8 @@ async def admin_get_songs(request: Request, db: Session = Depends(get_db)):
 @router.get("/admin/songs/{song_id}")
 async def admin_get_song(song_id: str, request: Request, db: Session = Depends(get_db)):
     """获取歌曲完整详情"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
 
     # 该歌曲所有录音按 segment_id 分组
     recs_by_seg = {}
@@ -1952,10 +2333,8 @@ async def admin_get_song(song_id: str, request: Request, db: Session = Depends(g
 @router.put("/admin/songs/{song_id}")
 async def admin_update_song(song_id: str, request: Request, db: Session = Depends(get_db)):
     """更新歌曲基本信息"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
     body = await request.json()
     if "title" in body:
         song.title = body["title"]
@@ -1971,10 +2350,8 @@ async def admin_update_song(song_id: str, request: Request, db: Session = Depend
 @router.delete("/admin/songs/{song_id}")
 async def admin_delete_song(song_id: str, request: Request, db: Session = Depends(get_db)):
     """删除歌曲及其所有关联数据和文件"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
 
     audio_file = song.audio_file
     acc_file = song.accompaniment_file
@@ -2038,6 +2415,7 @@ def _replace_segments_with_dicts(db: Session, song: Song, seg_dicts: list) -> li
     for d in seg_dicts:
         if not d.get("id"):
             d["id"] = f"{song.id}-{uuid.uuid4().hex[:6]}"
+        d["owner_admin_id"] = song.owner_admin_id
         # 避免 ID 冲突
         while db.get(Segment, d["id"]) is not None:
             d["id"] = f"{song.id}-{uuid.uuid4().hex[:6]}"
@@ -2051,10 +2429,8 @@ def _replace_segments_with_dicts(db: Session, song: Song, seg_dicts: list) -> li
 @router.post("/admin/songs/{song_id}/lyrics")
 async def admin_upload_lyrics(song_id: str, request: Request, db: Session = Depends(get_db)):
     """为已有歌曲上传歌词（支持 LRC 格式精确匹配或纯文本 AI 分配）"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
 
     body = await request.json()
     full_lyrics = body.get("lyrics", "").strip()
@@ -2116,10 +2492,8 @@ async def admin_upload_lyrics(song_id: str, request: Request, db: Session = Depe
 @router.post("/admin/songs/{song_id}/auto-lyrics")
 async def admin_auto_fetch_lyrics(song_id: str, request: Request, db: Session = Depends(get_db)):
     """自动从 lrclib.net 获取歌词并分配到唱段"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
 
     title = song.title or ""
     artist = song.artist or ""
@@ -2207,10 +2581,8 @@ async def admin_auto_fetch_lyrics(song_id: str, request: Request, db: Session = 
 @router.put("/admin/segments/{segment_id}")
 async def admin_update_segment(segment_id: str, request: Request, db: Session = Depends(get_db)):
     """更新唱段信息（时间、歌词、难度等）"""
-    verify_admin(request)
-    seg = db.get(Segment, segment_id)
-    if not seg:
-        raise HTTPException(status_code=404, detail="唱段不存在")
+    admin = verify_admin(request, db)
+    seg = _get_owned_segment(db, segment_id, admin)
     body = await request.json()
     for key in ["start_time", "end_time", "lyrics", "difficulty", "is_chorus", "status"]:
         if key in body:
@@ -2223,10 +2595,8 @@ async def admin_update_segment(segment_id: str, request: Request, db: Session = 
 @router.post("/admin/songs/{song_id}/segments")
 async def admin_add_segment(song_id: str, request: Request, db: Session = Depends(get_db)):
     """新增唱段"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
     body = await request.json()
 
     existing_count = len(song.segments)
@@ -2236,6 +2606,7 @@ async def admin_add_segment(song_id: str, request: Request, db: Session = Depend
 
     seg = Segment(
         id=seg_id,
+        owner_admin_id=song.owner_admin_id,
         song_id=song_id,
         index=existing_count + 1,
         start_time=body.get("start_time", 0),
@@ -2265,10 +2636,8 @@ async def admin_add_segment(song_id: str, request: Request, db: Session = Depend
 @router.delete("/admin/segments/{segment_id}")
 async def admin_delete_segment(segment_id: str, request: Request, db: Session = Depends(get_db)):
     """删除唱段"""
-    verify_admin(request)
-    seg = db.get(Segment, segment_id)
-    if not seg:
-        raise HTTPException(status_code=404, detail="唱段不存在")
+    admin = verify_admin(request, db)
+    seg = _get_owned_segment(db, segment_id, admin)
     song = db.get(Song, seg.song_id)
     db.delete(seg)
     db.flush()
@@ -2285,10 +2654,8 @@ async def admin_delete_segment(segment_id: str, request: Request, db: Session = 
 @router.put("/admin/songs/{song_id}/segments/batch")
 async def admin_batch_update_segments(song_id: str, request: Request, db: Session = Depends(get_db)):
     """批量替换唱段（前端方案原样写入）"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
     if song.task_published:
         raise HTTPException(status_code=400, detail="任务已发布，无法修改分段。请先取消任务。")
     body = await request.json()
@@ -2363,6 +2730,7 @@ async def admin_batch_update_segments(song_id: str, request: Request, db: Sessio
             status = "unassigned"
         seg = Segment(
             id=new_id,
+            owner_admin_id=song.owner_admin_id,
             song_id=song_id,
             index=i + 1,
             start_time=sd.get("start_time", 0),
@@ -2390,10 +2758,8 @@ async def admin_batch_update_segments(song_id: str, request: Request, db: Sessio
 @router.post("/admin/songs/{song_id}/publish-task")
 async def admin_publish_task(song_id: str, request: Request, db: Session = Depends(get_db)):
     """发布歌曲任务"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
     if not song.segments:
         raise HTTPException(status_code=400, detail="歌曲没有唱段数据，请先完成分段编辑")
     song.task_published = True
@@ -2406,10 +2772,8 @@ async def admin_publish_task(song_id: str, request: Request, db: Session = Depen
 @router.post("/admin/songs/{song_id}/unpublish-task")
 async def admin_unpublish_task(song_id: str, request: Request, db: Session = Depends(get_db)):
     """取消歌曲任务，删除该歌曲所有用户录音并恢复可编辑状态"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
 
     # 删除录音 + 文件
     recs = db.query(Recording).filter(Recording.song_id == song_id).all()
@@ -2444,10 +2808,8 @@ async def admin_unpublish_task(song_id: str, request: Request, db: Session = Dep
 @router.get("/admin/songs/{song_id}/free-tasks")
 async def admin_get_free_tasks(song_id: str, request: Request, db: Session = Depends(get_db)):
     """获取歌曲的自由任务列表"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
     free_tasks = []
     for ft in song.free_tasks:
         ft_data = ft.to_dict()
@@ -2464,10 +2826,8 @@ async def admin_get_free_tasks(song_id: str, request: Request, db: Session = Dep
 @router.post("/admin/songs/{song_id}/free-tasks")
 async def admin_create_free_task(song_id: str, request: Request, db: Session = Depends(get_db)):
     """创建新的自由任务（最多5个）"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
 
     body = await request.json()
     description = (body.get("description") or "").strip()
@@ -2486,6 +2846,7 @@ async def admin_create_free_task(song_id: str, request: Request, db: Session = D
 
     ft = FreeTask(
         id=f"ft_{uuid.uuid4().hex[:8]}",
+        owner_admin_id=song.owner_admin_id,
         song_id=song_id,
         description=description,
         start_time=start_time,
@@ -2505,10 +2866,8 @@ async def admin_create_free_task(song_id: str, request: Request, db: Session = D
 @router.delete("/admin/songs/{song_id}/free-tasks/{free_task_id}")
 async def admin_delete_free_task(song_id: str, free_task_id: str, request: Request, db: Session = Depends(get_db)):
     """删除自由任务（同时删除其录音）"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
 
     ft = db.query(FreeTask).filter(FreeTask.id == free_task_id, FreeTask.song_id == song_id).first()
     if not ft:
@@ -2535,9 +2894,10 @@ async def admin_delete_free_task(song_id: str, free_task_id: str, request: Reque
 @router.get("/admin/recordings")
 async def admin_get_recordings(request: Request, song_id: Optional[str] = None, db: Session = Depends(get_db)):
     """获取所有录音（含未提交的）"""
-    verify_admin(request)
-    q = db.query(Recording)
+    admin = verify_admin(request, db)
+    q = _filter_owner(db.query(Recording), Recording, admin)
     if song_id:
+        _get_owned_song(db, song_id, admin)
         q = q.filter(Recording.song_id == song_id)
     return {"success": True, "data": [r.to_dict() for r in q.all()]}
 
@@ -2548,10 +2908,8 @@ async def admin_select_recording(recording_id: str, request: Request, db: Sessio
     独唱段：互斥，同段仅允许一条选定
     合唱段：允许多选（最多20条）
     """
-    verify_admin(request)
-    rec = db.get(Recording, recording_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="录音不存在")
+    admin = verify_admin(request, db)
+    rec = _get_owned_recording(db, recording_id, admin)
     seg = db.get(Segment, rec.segment_id)
     is_chorus = bool(seg.is_chorus) if seg else False
     if is_chorus:
@@ -2574,10 +2932,8 @@ async def admin_select_recording(recording_id: str, request: Request, db: Sessio
 @router.post("/admin/recordings/{recording_id}/unselect")
 async def admin_unselect_recording(recording_id: str, request: Request, db: Session = Depends(get_db)):
     """取消选定录音"""
-    verify_admin(request)
-    rec = db.get(Recording, recording_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="录音不存在")
+    admin = verify_admin(request, db)
+    rec = _get_owned_recording(db, recording_id, admin)
     rec.selected = False
     db.commit()
     db.refresh(rec)
@@ -2587,7 +2943,7 @@ async def admin_unselect_recording(recording_id: str, request: Request, db: Sess
 @router.post("/admin/recordings/{recording_id}/trim")
 async def admin_trim_recording(recording_id: str, request: Request, db: Session = Depends(get_db)):
     """裁剪录音：将开头和结尾指定秒数的音频静音（保持总时长不变）"""
-    verify_admin(request)
+    admin = verify_admin(request, db)
     body = await request.json()
     trim_start = float(body.get("trim_start", 0))
     trim_end = float(body.get("trim_end", 0))
@@ -2595,9 +2951,7 @@ async def admin_trim_recording(recording_id: str, request: Request, db: Session 
     if trim_start <= 0 and trim_end <= 0:
         return {"success": True, "message": "无需裁剪"}
 
-    rec = db.get(Recording, recording_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="录音不存在")
+    rec = _get_owned_recording(db, recording_id, admin)
 
     audio_url = rec.audio_url or ""
     filename = audio_url.split("/")[-1] if "/" in audio_url else audio_url
@@ -2665,13 +3019,13 @@ async def admin_trim_recording(recording_id: str, request: Request, db: Session 
 @router.get("/admin/stats")
 async def admin_stats(request: Request, db: Session = Depends(get_db)):
     """获取系统统计"""
-    verify_admin(request)
-    total_songs = db.query(sql_func.count(Song.id)).scalar() or 0
-    total_segments = db.query(sql_func.count(Segment.id)).scalar() or 0
-    total_recordings = db.query(sql_func.count(Recording.id)).scalar() or 0
+    admin = verify_admin(request, db)
+    total_songs = _filter_owner(db.query(sql_func.count(Song.id)), Song, admin).scalar() or 0
+    total_segments = _filter_owner(db.query(sql_func.count(Segment.id)), Segment, admin).scalar() or 0
+    total_recordings = _filter_owner(db.query(sql_func.count(Recording.id)), Recording, admin).scalar() or 0
     total_users = db.query(sql_func.count(User.id)).scalar() or 0
-    completed_segments = db.query(sql_func.count(Segment.id)).filter(Segment.status == "completed").scalar() or 0
-    submitted_recordings = db.query(sql_func.count(Recording.id)).filter(Recording.submitted == True).scalar() or 0
+    completed_segments = _filter_owner(db.query(sql_func.count(Segment.id)).filter(Segment.status == "completed"), Segment, admin).scalar() or 0
+    submitted_recordings = _filter_owner(db.query(sql_func.count(Recording.id)).filter(Recording.submitted == True), Recording, admin).scalar() or 0
     return {"success": True, "data": {
         "total_songs": int(total_songs),
         "total_segments": int(total_segments),
@@ -2709,10 +3063,8 @@ async def admin_upload_accompaniment(
     db: Session = Depends(get_db),
 ):
     """上传伴奏文件，校验时长与原曲基本一致"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
 
     _, ext = os.path.splitext(audio.filename or "")
     ext = ext.lower()
@@ -2760,10 +3112,8 @@ async def admin_upload_accompaniment(
 @router.delete("/admin/songs/{song_id}/accompaniment")
 async def admin_delete_accompaniment(song_id: str, request: Request, db: Session = Depends(get_db)):
     """删除伴奏文件"""
-    verify_admin(request)
-    song = db.get(Song, song_id)
-    if not song:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song = _get_owned_song(db, song_id, admin)
     acc_file = song.accompaniment_file
     song.accompaniment_url = None
     song.accompaniment_file = None
@@ -3135,8 +3485,10 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
 
         # 保存到数据库（在后台线程中开新 Session）
         with db_session() as db_bg:
+            owner_admin_id = song.get("owner_admin_id")
             final_orm = Final(
                 id=final_id,
+                owner_admin_id=owner_admin_id,
                 song_id=song_id,
                 song_title=song.get("title", ""),
                 song_artist=song.get("artist", ""),
@@ -3176,10 +3528,8 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
 @router.post("/admin/songs/{song_id}/synthesize")
 async def admin_start_synthesis(song_id: str, request: Request, db: Session = Depends(get_db)):
     """启动合成任务"""
-    verify_admin(request)
-    song_orm = db.get(Song, song_id)
-    if not song_orm:
-        raise HTTPException(status_code=404, detail="歌曲不存在")
+    admin = verify_admin(request, db)
+    song_orm = _get_owned_song(db, song_id, admin)
 
     existing = SYNTH_TASKS.get(song_id)
     if existing and existing.get("status") == "running":
@@ -3204,6 +3554,7 @@ async def admin_start_synthesis(song_id: str, request: Request, db: Session = De
     for seg in segments_dicts:
         seg_recs_orm = db.query(Recording).filter(
             Recording.segment_id == seg["id"],
+            Recording.owner_admin_id == song_orm.owner_admin_id,
             Recording.selected == True,
             Recording.submitted == True,
         ).all()
@@ -3244,9 +3595,10 @@ async def admin_start_synthesis(song_id: str, request: Request, db: Session = De
 
 
 @router.get("/admin/songs/{song_id}/synth-status")
-async def admin_synth_status(song_id: str, request: Request):
+async def admin_synth_status(song_id: str, request: Request, db: Session = Depends(get_db)):
     """查询合成任务状态"""
-    verify_admin(request)
+    admin = verify_admin(request, db)
+    _get_owned_song(db, song_id, admin)
     task = SYNTH_TASKS.get(song_id)
     if not task:
         return {"success": True, "data": {"status": "none"}}
@@ -3258,28 +3610,24 @@ async def admin_synth_status(song_id: str, request: Request):
 @router.get("/admin/finals")
 async def admin_get_finals(request: Request, db: Session = Depends(get_db)):
     """获取所有最终成曲"""
-    verify_admin(request)
-    finals = db.query(Final).order_by(Final.created_at.desc()).all()
+    admin = verify_admin(request, db)
+    finals = _filter_owner(db.query(Final), Final, admin).order_by(Final.created_at.desc()).all()
     return {"success": True, "data": [f.to_dict() for f in finals]}
 
 
 @router.get("/admin/finals/{final_id}")
 async def admin_get_final(final_id: str, request: Request, db: Session = Depends(get_db)):
     """获取单个最终成曲详情"""
-    verify_admin(request)
-    final = db.get(Final, final_id)
-    if not final:
-        raise HTTPException(status_code=404, detail="成曲不存在")
+    admin = verify_admin(request, db)
+    final = _get_owned_final(db, final_id, admin)
     return {"success": True, "data": final.to_dict()}
 
 
 @router.post("/admin/finals/{final_id}/publish")
 async def admin_publish_final(final_id: str, request: Request, db: Session = Depends(get_db)):
     """发布成曲"""
-    verify_admin(request)
-    final = db.get(Final, final_id)
-    if not final:
-        raise HTTPException(status_code=404, detail="成曲不存在")
+    admin = verify_admin(request, db)
+    final = _get_owned_final(db, final_id, admin)
     final.published = True
     final.published_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     db.commit()
@@ -3290,10 +3638,8 @@ async def admin_publish_final(final_id: str, request: Request, db: Session = Dep
 @router.post("/admin/finals/{final_id}/unpublish")
 async def admin_unpublish_final(final_id: str, request: Request, db: Session = Depends(get_db)):
     """取消发布"""
-    verify_admin(request)
-    final = db.get(Final, final_id)
-    if not final:
-        raise HTTPException(status_code=404, detail="成曲不存在")
+    admin = verify_admin(request, db)
+    final = _get_owned_final(db, final_id, admin)
     final.published = False
     final.published_at = None
     db.commit()
@@ -3304,10 +3650,8 @@ async def admin_unpublish_final(final_id: str, request: Request, db: Session = D
 @router.delete("/admin/finals/{final_id}")
 async def admin_delete_final(final_id: str, request: Request, db: Session = Depends(get_db)):
     """删除成曲及其所有关联文件"""
-    verify_admin(request)
-    final = db.get(Final, final_id)
-    if not final:
-        raise HTTPException(status_code=404, detail="成曲不存在")
+    admin = verify_admin(request, db)
+    final = _get_owned_final(db, final_id, admin)
     audio_file = final.audio_file or ""
     meta_file = final.metadata_file or ""
     recs_dir = final.recordings_dir or ""

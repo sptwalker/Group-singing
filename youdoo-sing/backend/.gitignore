@@ -27,4 +27,5 @@ uploads/
 
 # Database
 *.db
+*.sqlite
 *.sqlite3

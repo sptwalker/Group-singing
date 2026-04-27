@@ -8,6 +8,7 @@ class Segment(Base):
     __tablename__ = "segments"
 
     id = Column(String(64), primary_key=True, index=True)
+    owner_admin_id = Column(String(32), nullable=True, index=True)
     song_id = Column(String(32), ForeignKey("songs.id", ondelete="CASCADE"), nullable=False, index=True)
     index = Column(Integer, nullable=False, default=0)
     start_time = Column(Float, nullable=False, default=0.0)
@@ -31,6 +32,7 @@ class Segment(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "owner_admin_id": self.owner_admin_id,
             "song_id": self.song_id,
             "index": self.index,
             "start_time": self.start_time,
@@ -50,6 +52,7 @@ class SegmentClaim(Base):
     __tablename__ = "segment_claims"
 
     id = Column(String(32), primary_key=True, index=True)
+    owner_admin_id = Column(String(32), nullable=True, index=True)
     segment_id = Column(String(64), ForeignKey("segments.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(String(64), nullable=False, index=True)
     user_name = Column(String(255), nullable=False)
@@ -61,6 +64,7 @@ class SegmentClaim(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "owner_admin_id": self.owner_admin_id,
             "segment_id": self.segment_id,
             "user_id": self.user_id,
             "user_name": self.user_name,

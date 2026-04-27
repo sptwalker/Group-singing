@@ -16,11 +16,13 @@ except ImportError:
 
 from app.api.routes import router
 from app.core.database import init_db
+from app.core.multitenant import bootstrap_multitenant
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    bootstrap_multitenant()
     print("[startup] MySQL schema ready")
     yield
 

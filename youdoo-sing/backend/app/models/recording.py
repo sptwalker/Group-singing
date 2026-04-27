@@ -10,6 +10,7 @@ class Recording(Base):
     __tablename__ = "recordings"
 
     id = Column(String(32), primary_key=True, index=True)
+    owner_admin_id = Column(String(32), nullable=True, index=True)
     segment_id = Column(String(64), nullable=False, index=True)
     song_id = Column(String(32), nullable=False, index=True)
     user_id = Column(String(64), nullable=False, index=True)
@@ -26,6 +27,7 @@ class Recording(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "owner_admin_id": self.owner_admin_id,
             "segment_id": self.segment_id,
             "song_id": self.song_id,
             "user_id": self.user_id,

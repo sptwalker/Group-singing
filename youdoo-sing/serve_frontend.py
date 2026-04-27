@@ -7,7 +7,17 @@ DIRECTORY = os.path.join(os.path.dirname(__file__), "frontend", "public")
 
 os.chdir(DIRECTORY)
 
-handler = http.server.SimpleHTTPRequestHandler
+
+class FrontendHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
+        super().do_GET()
+
+
+handler = FrontendHandler
 with http.server.HTTPServer(("0.0.0.0", PORT), handler) as httpd:
     print(f"前端服务运行在 http://localhost:{PORT}")
     print(f"服务目录: {DIRECTORY}")

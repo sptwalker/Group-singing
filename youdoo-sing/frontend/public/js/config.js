@@ -1,5 +1,6 @@
 // ===== 全局配置 =====
-const API_BASE = (window.YOUDOO_API_BASE || '/api').replace(/\/$/, '');
+const DEFAULT_API_BASE = window.location.port === '3000' ? 'http://localhost:8000/api' : '/api';
+const API_BASE = (window.YOUDOO_API_BASE || DEFAULT_API_BASE).replace(/\/$/, '');
 let _loginRedirectTimer = 0;
 
 // ===== 全局音频管理器（强制互斥） =====

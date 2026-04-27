@@ -1,6 +1,14 @@
 // ===== 管理后台核心框架 =====
-const API = (window.YOUDOO_API_BASE || '/api').replace(/\/$/, '');
+const DEFAULT_API_BASE = window.location.port === '3000' ? 'http://localhost:8000/api' : '/api';
+const API = (window.YOUDOO_API_BASE || DEFAULT_API_BASE).replace(/\/$/, '');
 let adminToken = localStorage.getItem('admin_token') || '';
+
+async function parseApiResponse(res) {
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) return res.json();
+    const text = await res.text();
+    throw new Error(text.trim().startsWith('<') ? 'API服务地址错误或后端未启动' : (text || `请求失败(${res.status})`));
+}
 
 // ===== API 工具 =====
 async function adminFetch(path, opts = {}) {
@@ -12,10 +20,10 @@ async function adminFetch(path, opts = {}) {
     const res = await fetch(`${API}${path}`, { ...opts, headers });
     if (res.status === 401) { doLogout(); throw new Error('登录已过期'); }
     if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const err = await parseApiResponse(res).catch(error => ({ detail: error.message }));
         throw new Error(err.detail || `请求失败(${res.status})`);
     }
-    return res.json();
+    return parseApiResponse(res);
 }
 const aGet = (p) => adminFetch(p);
 const aPut = (p, b) => adminFetch(p, { method: 'PUT', body: b });
@@ -80,7 +88,7 @@ function initAuth() {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username: document.getElementById('loginUser').value, password: document.getElementById('loginPass').value })
             });
-            const data = await res.json();
+            const data = await parseApiResponse(res);
             if (!res.ok) throw new Error(data.detail || '登录失败');
             adminToken = data.data.token;
             localStorage.setItem('admin_token', adminToken);

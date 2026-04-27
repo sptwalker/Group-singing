@@ -8,6 +8,7 @@ class Song(Base):
     __tablename__ = "songs"
 
     id = Column(String(32), primary_key=True, index=True)
+    owner_admin_id = Column(String(32), nullable=True, index=True)
     title = Column(String(255), nullable=False)
     artist = Column(String(255), nullable=True, default="")
     duration = Column(Float, nullable=False, default=0.0)
@@ -42,6 +43,7 @@ class Song(Base):
     def to_dict(self, include_segments: bool = True) -> dict:
         d = {
             "id": self.id,
+            "owner_admin_id": self.owner_admin_id,
             "title": self.title,
             "artist": self.artist or "",
             "duration": self.duration,
