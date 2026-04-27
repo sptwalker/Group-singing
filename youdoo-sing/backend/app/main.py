@@ -3,11 +3,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router as legacy_api_router
 from app.core.database import init_db
+from app.core.multitenant import bootstrap_multitenant
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    bootstrap_multitenant()
     print("[startup] MySQL schema ready")
     yield
 

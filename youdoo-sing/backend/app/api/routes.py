@@ -17,10 +17,14 @@ import httpx
 from urllib.parse import urlencode, urlsplit
 from contextlib import contextmanager
 
+import hashlib
+import hmac as _hmac
+
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func as sql_func
 from app.core.database import get_db, SessionLocal
 from app.core.multitenant import hash_password, verify_password, get_setting, set_setting, log_audit, new_id, now_str
+from app.core.auth import create_session, delete_session, set_session_cookie, clear_session_cookie, get_current_user, COOKIE_NAME
 from app.models import Song, Segment, SegmentClaim, Recording, User, FreeTask, Final, AdminUser, AdminInviteCode, SystemSetting, AuditLog
 
 # OpenAI API 配置（用于 DeepSeek 等兼容接口）
@@ -35,6 +39,23 @@ router = APIRouter(prefix="/api", tags=["api"])
 
 # ============ 管理员会话 ============
 ADMIN_TOKENS = {}  # token -> {id, username, role, login_time}
+
+
+# ============ 用户密码工具 ============
+
+def _hash_user_password(password: str) -> str:
+    salt = os.urandom(16).hex()
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200_000)
+    return f"pbkdf2:200000:{salt}:{dk.hex()}"
+
+
+def _verify_user_password(password: str, stored: str) -> bool:
+    try:
+        _, iters, salt, dk_hex = stored.split(":")
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), int(iters))
+        return _hmac.compare_digest(dk.hex(), dk_hex)
+    except Exception:
+        return False
 
 
 MUSIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "music"))
@@ -1243,9 +1264,8 @@ def _render_wechat_callback_page(target: str, user: Optional[dict] = None, error
         const retryLink = document.getElementById('retryLink');
 
         if (user && user.id) {{
-            localStorage.setItem('youdoo_user', JSON.stringify(user));
-            titleEl.textContent = 'Login successful';
-            descEl.textContent = 'Redirecting...';
+            titleEl.textContent = '登录成功';
+            descEl.textContent = '正在跳转...';
             window.location.replace(target);
         }} else {{
             titleEl.textContent = 'Login failed';
@@ -1364,7 +1384,9 @@ async def wechat_login_callback(
 
         with db_session() as db:
             user = _upsert_wechat_user(db, token_data, profile_data)
-        return _wechat_callback_response(safe_target, user=user, json_mode=json_mode)
+        resp = _wechat_callback_response(safe_target, user=user, json_mode=json_mode)
+        set_session_cookie(resp, create_session(user))
+        return resp
     except Exception as exc:
         print(f"[wechat] login callback failed: {exc}")
         return _wechat_callback_response(
@@ -1390,6 +1412,115 @@ async def user_login(nickname: str = Form(...), db: Session = Depends(get_db)):
         last_login_at=now,
     )
     db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"success": True, "data": user.to_dict()}
+
+
+# ============ 传统账号认证接口 ============
+
+_USERNAME_RE = re.compile(r'^[a-zA-Z0-9_]{3,32}$')
+
+
+@router.post("/auth/register")
+async def auth_register(
+    username: str = Form(...),
+    password: str = Form(...),
+    nickname: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    username = username.strip()
+    if not _USERNAME_RE.match(username):
+        raise HTTPException(400, "用户名需为 3-32 位字母、数字或下划线")
+    if len(password) < 6:
+        raise HTTPException(400, "密码不能少于 6 位")
+    if db.query(User).filter(User.username == username).first():
+        raise HTTPException(400, "用户名已存在")
+
+    nick = nickname.strip() or username
+    now = now_str()
+    user = User(
+        id=new_id("u"),
+        username=username,
+        password_hash=_hash_user_password(password),
+        nickname=nick,
+        avatar=f"https://api.dicebear.com/7.x/fun-emoji/svg?seed={nick}",
+        auth_provider="password",
+        created_at=now,
+        last_login_at=now,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    user_dict = user.to_dict()
+    resp = JSONResponse({"success": True, "data": user_dict})
+    set_session_cookie(resp, create_session(user_dict))
+    return resp
+
+
+@router.post("/auth/login")
+async def auth_login(
+    username: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    username = username.strip()
+    user = db.query(User).filter(User.username == username).first()
+    if not user or not user.password_hash or not _verify_user_password(password, user.password_hash):
+        raise HTTPException(401, "用户名或密码错误")
+
+    user.last_login_at = now_str()
+    db.commit()
+    db.refresh(user)
+
+    user_dict = user.to_dict()
+    resp = JSONResponse({"success": True, "data": user_dict})
+    set_session_cookie(resp, create_session(user_dict))
+    return resp
+
+
+@router.post("/auth/logout")
+async def auth_logout(request: Request):
+    session_id = request.cookies.get(COOKIE_NAME)
+    if session_id:
+        delete_session(session_id)
+    resp = JSONResponse({"success": True})
+    clear_session_cookie(resp)
+    return resp
+
+
+@router.get("/me")
+async def get_me(request: Request):
+    from app.core.auth import get_optional_user
+    user = get_optional_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="未登录")
+    return {"success": True, "data": user}
+
+
+@router.post("/auth/bind-password")
+async def auth_bind_password(
+    username: str = Form(...),
+    password: str = Form(...),
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    current = get_current_user(request)
+    username = username.strip()
+    if not _USERNAME_RE.match(username):
+        raise HTTPException(400, "用户名需为 3-32 位字母、数字或下划线")
+    if len(password) < 6:
+        raise HTTPException(400, "密码不能少于 6 位")
+    conflict = db.query(User).filter(User.username == username, User.id != current["id"]).first()
+    if conflict:
+        raise HTTPException(400, "用户名已被占用")
+
+    user = db.get(User, current["id"])
+    if not user:
+        raise HTTPException(404, "用户不存在")
+    user.username = username
+    user.password_hash = _hash_user_password(password)
     db.commit()
     db.refresh(user)
     return {"success": True, "data": user.to_dict()}
@@ -1489,11 +1620,14 @@ async def get_segments(song_id: str, db: Session = Depends(get_db)):
 @router.post("/segments/{segment_id}/claim")
 async def claim_segment(
     segment_id: str,
-    user_id: str = Form(...),
-    user_name: str = Form(...),
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """认领唱段"""
+    current = get_current_user(request)
+    user_id = current["id"]
+    user_name = current["nickname"]
+
     seg = db.get(Segment, segment_id)
     if not seg:
         raise HTTPException(status_code=404, detail="唱段不存在")
@@ -1540,11 +1674,14 @@ async def claim_segment(
 @router.post("/segments/random-claim")
 async def random_claim(
     song_id: str = Form(...),
-    user_id: str = Form(...),
-    user_name: str = Form(...),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
     """随机认领一个可唱段"""
+    current = get_current_user(request)
+    user_id = current["id"]
+    user_name = current["nickname"]
+
     song = _get_active_song_for_user(db, song_id)
 
 
@@ -1592,15 +1729,18 @@ async def random_claim(
 async def upload_recording(
     segment_id: str = Form(...),
     song_id: str = Form(...),
-    user_id: str = Form(...),
-    user_name: str = Form(...),
     score: float = Form(0.0),
     score_detail: str = Form(""),
-    user_avatar: str = Form(""),
     audio: UploadFile = File(...),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
     """上传录音"""
+    current = get_current_user(request)
+    user_id = current["id"]
+    user_name = current["nickname"]
+    avatar = current.get("avatar") or f"https://api.dicebear.com/7.x/fun-emoji/svg?seed={user_name}"
+
     rec_id = str(uuid.uuid4())[:8]
     filename = f"{rec_id}.webm"
     filepath = os.path.join(UPLOAD_DIR, filename)
@@ -1615,14 +1755,6 @@ async def upload_recording(
             parsed_detail = json.loads(score_detail)
         except Exception:
             pass
-
-    avatar = user_avatar or ""
-    if not avatar:
-        u = db.get(User, user_id)
-        if u:
-            avatar = u.avatar or ""
-    if not avatar:
-        avatar = f"https://api.dicebear.com/7.x/fun-emoji/svg?seed={user_name}"
 
     seg = db.get(Segment, segment_id)
     song = db.get(Song, song_id)

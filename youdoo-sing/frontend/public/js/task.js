@@ -1,10 +1,12 @@
 // ===== 任务页逻辑 =====
-(function () {
+(async function () {
+    if (hasWechatAuthCallbackParams() || window.__YOUDOO_WECHAT_AUTH_PENDING) {
+        return;
+    }
+
+    await initCurrentUser();
     const user = getUser();
     if (!user) {
-        if (hasWechatAuthCallbackParams() || window.__YOUDOO_WECHAT_AUTH_PENDING) {
-            return;
-        }
         setPendingLoginTarget(getCurrentPageTarget('task.html'));
         window.location.replace('index.html');
         return;
@@ -38,10 +40,11 @@
     // WaveSurfer 可视化实�?
     let _visualizerWS = null;
 
-    // 退出登�?
-    btnLogout.addEventListener('click', () => {
+    // 退出登录
+    btnLogout.addEventListener('click', async () => {
         if (confirm('确定退出登录？')) {
-            localStorage.removeItem('youdoo_user');
+            await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
+            _currentUser = null;
             window.location.href = 'index.html';
         }
     });
@@ -523,10 +526,7 @@
         const currentUser = requireUser('Please sign in before claiming a segment');
         if (!currentUser) return;
         try {
-            const fd = new FormData();
-            fd.append('user_id', currentUser.id);
-            fd.append('user_name', currentUser.nickname);
-            await apiPost(`/segments/${seg.id}/claim`, fd);
+            await apiPost(`/segments/${seg.id}/claim`, new FormData());
 
             localStorage.setItem('youdoo_record_segment', JSON.stringify(seg));
             localStorage.setItem('youdoo_record_song', JSON.stringify(currentSong));
@@ -706,8 +706,6 @@
         try {
             const fd = new FormData();
             fd.append('song_id', currentSong.id);
-            fd.append('user_id', currentUser.id);
-            fd.append('user_name', currentUser.nickname);
             const res = await apiPost('/segments/random-claim', fd);
             if (res.success) {
                 showToast('随机认领成功');

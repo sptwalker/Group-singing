@@ -46,8 +46,6 @@ services:
       MYSQL_DATABASE: ${MYSQL_DB:-youdoo_sing}
       MYSQL_USER: ${MYSQL_USER:-youdoo}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-youdoo}
-    ports:
-      - "3306:3306"
     volumes:
       - youdoo-mysql:/var/lib/mysql
     healthcheck:

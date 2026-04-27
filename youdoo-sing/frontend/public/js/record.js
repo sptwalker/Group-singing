@@ -1,5 +1,11 @@
 // ===== 录音页逻辑 =====
-(function () {
+(async function () {
+    if (hasWechatAuthCallbackParams() || window.__YOUDOO_WECHAT_AUTH_PENDING) {
+        // config.js 的 WeChat 回调会在完成后 redirect，不需要这里处理
+        return;
+    }
+
+    await initCurrentUser();
     const user = getUser();
     const song = JSON.parse(localStorage.getItem('youdoo_record_song'));
     const segment = JSON.parse(localStorage.getItem('youdoo_record_segment'));
@@ -37,11 +43,7 @@
     }
 
     if (!user) {
-        if (hasWechatAuthCallbackParams() || window.__YOUDOO_WECHAT_AUTH_PENDING) {
-            renderUnavailable('Signing in...', 'Please wait while WeChat login completes.');
-            return;
-        }
-        renderUnavailable('Login required', 'Open the home page and sign in before recording.');
+        renderUnavailable('需要登录', '请先到首页登录后再录音。');
         return;
     }
 
@@ -1480,9 +1482,6 @@
             const fd = new FormData();
             fd.append('segment_id', segment.id);
             fd.append('song_id', song.id);
-            fd.append('user_id', user.id);
-            fd.append('user_name', user.nickname);
-            fd.append('user_avatar', user.avatar || '');
             fd.append('score', rec.score);
             // 传递多维度评分详情
             if (rec.scoreResult) {

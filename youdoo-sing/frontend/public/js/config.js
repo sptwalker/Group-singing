@@ -3,6 +3,23 @@ const DEFAULT_API_BASE = window.location.port === '3000' ? 'http://localhost:800
 const API_BASE = (window.YOUDOO_API_BASE || DEFAULT_API_BASE).replace(/\/$/, '');
 let _loginRedirectTimer = 0;
 
+// ===== 当前用户（server-side session，不再用 localStorage） =====
+let _currentUser = null;
+
+function getUser() {
+    return _currentUser;
+}
+
+async function initCurrentUser() {
+    try {
+        const res = await fetch(`${API_BASE}/me`, { credentials: 'include' });
+        _currentUser = res.ok ? ((await res.json()).data || null) : null;
+    } catch (_) {
+        _currentUser = null;
+    }
+    return _currentUser;
+}
+
 // ===== 全局音频管理器（强制互斥） =====
 const AudioManager = {
     _current: null,
@@ -208,11 +225,6 @@ function formatTime(sec) {
     return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-function getUser() {
-    const u = localStorage.getItem('youdoo_user');
-    return u ? JSON.parse(u) : null;
-}
-
 const LOGIN_TARGET_KEY = 'youdoo_login_target';
 let _wechatLoginConfigPromise = null;
 let _wechatCallbackPromise = null;
@@ -325,7 +337,7 @@ async function handleWechatAuthCallback() {
         if (!user || !user.id) {
             throw new Error('Missing WeChat user info');
         }
-        localStorage.setItem('youdoo_user', JSON.stringify(user));
+        _currentUser = user;  // session cookie 已由服务端 Set-Cookie 设置
         setPendingLoginTarget(target);
         clearWechatCallbackParams();
         return { user, target };
@@ -423,7 +435,7 @@ function generateWaveformBars(count = 20, playing = false) {
 }
 
 async function apiGet(path) {
-    const res = await fetch(`${API_BASE}${path}`);
+    const res = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || '请求失败');
@@ -435,6 +447,7 @@ async function apiPost(path, formData) {
     const res = await fetch(`${API_BASE}${path}`, {
         method: 'POST',
         body: formData,
+        credentials: 'include',
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -444,7 +457,7 @@ async function apiPost(path, formData) {
 }
 
 async function apiDelete(path) {
-    const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE', credentials: 'include' });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || '请求失败');

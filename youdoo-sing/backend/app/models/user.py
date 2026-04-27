@@ -3,7 +3,7 @@ from app.core.database import Base
 
 
 class User(Base):
-    """用户（微信登录 / 模拟登录）"""
+    """用户（用户名密码 / 微信登录）"""
     __tablename__ = "users"
 
     id = Column(String(64), primary_key=True, index=True)
@@ -11,6 +11,8 @@ class User(Base):
     nickname = Column(String(255), nullable=False)
     avatar = Column(String(512), nullable=True)
     auth_provider = Column(String(32), nullable=True)
+    username = Column(String(64), unique=True, nullable=True, index=True)
+    password_hash = Column(String(255), nullable=True)
     wechat_openid = Column(String(128), nullable=True, index=True)
     wechat_unionid = Column(String(128), nullable=True, index=True)
     wechat_scope = Column(String(64), nullable=True)

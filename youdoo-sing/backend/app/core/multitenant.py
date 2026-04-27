@@ -121,6 +121,14 @@ def ensure_multitenant_schema() -> None:
             ("deleted_at", "deleted_at VARCHAR(32) NULL"),
         ]:
             _add_column_if_missing("admin_users", column, ddl)
+    if "users" in tables:
+        _add_column_if_missing("users", "username", "username VARCHAR(64) NULL")
+        _add_column_if_missing("users", "password_hash", "password_hash VARCHAR(255) NULL")
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("CREATE UNIQUE INDEX idx_users_username ON users (username)"))
+        except Exception:
+            pass
 
 
 def seed_multitenant_defaults() -> None:

@@ -19,8 +19,12 @@ class Settings(BaseSettings):
     MYSQL_PASSWORD: str = "youdoo"
     MYSQL_DB: str = "youdoo_sing"
 
-    # Redis（保留供未来使用，目前不依赖）
+    # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
+
+    # Session
+    SESSION_TTL: int = 60 * 20   # 20分钟（滑动过期）
+    COOKIE_SECURE: bool = False   # 生产环境改 true（HTTPS）
 
     # 文件存储配置
     UPLOAD_DIR: str = "./uploads"
