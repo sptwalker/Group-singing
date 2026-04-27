@@ -116,6 +116,11 @@ def ensure_multitenant_schema() -> None:
     if "admin_users" in tables:
         for column, ddl in [
             ("email_confirmed", "email_confirmed TINYINT(1) NOT NULL DEFAULT 0"),
+            ("email_activation_token", "email_activation_token VARCHAR(128) NULL"),
+            ("email_activation_expires_at", "email_activation_expires_at VARCHAR(32) NULL"),
+            ("pending_email", "pending_email VARCHAR(128) NULL"),
+            ("email_change_token", "email_change_token VARCHAR(128) NULL"),
+            ("email_change_expires_at", "email_change_expires_at VARCHAR(32) NULL"),
             ("freeze_tasks", "freeze_tasks TINYINT(1) NOT NULL DEFAULT 0"),
             ("storage_limit_mb", "storage_limit_mb INT NULL"),
             ("deleted_at", "deleted_at VARCHAR(32) NULL"),

@@ -12,6 +12,11 @@ class AdminUser(Base):
     display_name = Column(String(128), nullable=True)
     email = Column(String(128), nullable=True)
     email_confirmed = Column(Boolean, default=False, nullable=False)
+    email_activation_token = Column(String(128), nullable=True, index=True)
+    email_activation_expires_at = Column(String(32), nullable=True)
+    pending_email = Column(String(128), nullable=True)
+    email_change_token = Column(String(128), nullable=True, index=True)
+    email_change_expires_at = Column(String(32), nullable=True)
     role = Column(String(24), default="admin", nullable=False, index=True)
     status = Column(String(24), default="active", nullable=False, index=True)
     freeze_tasks = Column(Boolean, default=False, nullable=False)
@@ -28,6 +33,9 @@ class AdminUser(Base):
             "display_name": self.display_name or self.username,
             "email": self.email or "",
             "email_confirmed": bool(self.email_confirmed),
+            "email_activation_expires_at": self.email_activation_expires_at,
+            "pending_email": self.pending_email or "",
+            "email_change_expires_at": self.email_change_expires_at,
             "role": self.role,
             "status": self.status,
             "freeze_tasks": bool(self.freeze_tasks),

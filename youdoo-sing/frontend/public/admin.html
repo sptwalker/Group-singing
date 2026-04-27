@@ -23,6 +23,31 @@
                     <input type="password" id="loginPass" placeholder="请输入密码" required>
                 </div>
                 <button type="submit" class="btn-login" id="btnLogin">登 录</button>
+                <button type="button" class="btn-register-link" id="btnShowRegister">注册新管理员</button>
+            </form>
+            <form id="registerForm" class="register-form" autocomplete="off" style="display:none;">
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="regUser" placeholder="至少3个字符" required>
+                </div>
+                <div class="form-group">
+                    <label>邮箱</label>
+                    <input type="email" id="regEmail" placeholder="name@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" id="regPass" placeholder="长于6位，包含数字和字母" required>
+                </div>
+                <div class="form-group">
+                    <label>确认密码</label>
+                    <input type="password" id="regPassConfirm" placeholder="请再次输入密码" required>
+                </div>
+                <div class="form-group" id="regInviteGroup" style="display:none;">
+                    <label>授权码</label>
+                    <input type="text" id="regInvite" placeholder="请输入授权码">
+                </div>
+                <button type="submit" class="btn-login" id="btnRegister">注 册</button>
+                <button type="button" class="btn-register-link" id="btnBackLogin">返回登录</button>
             </form>
         </div>
     </div>
@@ -72,6 +97,7 @@
                 <button id="btnMenuToggle" class="btn-menu-toggle">☰</button>
                 <h2 id="pageTitle">仪表盘</h2>
                 <div class="topbar-right">
+                    <button id="btnAccountSettings" class="btn-account-settings" type="button">账号设置</button>
                     <span id="adminName" class="admin-name">admin</span>
                 </div>
             </header>
@@ -88,11 +114,12 @@
     <div id="modalContainer"></div>
 
     <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
-    <script src="js/admin-core.js?v=20260418b"></script>
+    <script src="js/admin-core.js?v=20260427a"></script>
     <script src="js/admin-modules.js?v=20260417b"></script>
     <script src="js/admin-editor.js?v=20260417b"></script>
     <script src="js/admin-editor2.js?v=20260417b"></script>
     <script src="js/admin-tasks.js?v=20260417c"></script>
+    <script src="js/admin-super.js?v=20260427a"></script>
 
 
 

@@ -11,7 +11,10 @@ import subprocess
 import threading
 import traceback
 import re
-from datetime import datetime
+import secrets
+import smtplib
+from email.message import EmailMessage
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 import httpx
 from urllib.parse import urlencode, urlsplit
@@ -23,6 +26,7 @@ import hmac as _hmac
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func as sql_func
 from app.core.database import get_db, SessionLocal
+from app.core.config import get_settings
 from app.core.multitenant import hash_password, verify_password, get_setting, set_setting, log_audit, new_id, now_str
 from app.core.auth import create_session, delete_session, set_session_cookie, clear_session_cookie, get_current_user, COOKIE_NAME
 from app.models import Song, Segment, SegmentClaim, Recording, User, FreeTask, Final, AdminUser, AdminInviteCode, SystemSetting, AuditLog
@@ -1974,6 +1978,9 @@ def _admin_public_data(admin: AdminUser) -> dict:
         "username": admin.username,
         "display_name": admin.display_name or admin.username,
         "email": admin.email or "",
+        "email_confirmed": bool(admin.email_confirmed),
+        "pending_email": admin.pending_email or "",
+        "email_change_expires_at": admin.email_change_expires_at,
         "role": admin.role,
         "status": admin.status,
         "song_limit": admin.song_limit,
@@ -2048,8 +2055,65 @@ async def admin_register_status(db: Session = Depends(get_db)):
     }}
 
 
+def _validate_admin_password(password: str) -> None:
+    if len(password or "") <= 6:
+        raise HTTPException(status_code=400, detail="密码需要长于6位")
+    if not re.search(r"[A-Za-z]", password or "") or not re.search(r"\d", password or ""):
+        raise HTTPException(status_code=400, detail="密码必须同时包含字母和数字")
+
+
+def _build_admin_activation_url(request: Request, token: str) -> str:
+    base = str(request.base_url).rstrip("/")
+    return f"{base}/api/admin/activate?token={token}"
+
+
+def _build_admin_email_change_url(request: Request, token: str) -> str:
+    base = str(request.base_url).rstrip("/")
+    return f"{base}/api/admin/email-change/confirm?token={token}"
+
+
+def _send_admin_email(to_email: str, subject: str, body: str) -> None:
+    settings = get_settings()
+    if not settings.SMTP_HOST or not settings.SMTP_PASSWORD:
+        print(f"[mail] SMTP未配置，邮件未实际发送。to={to_email}, subject={subject}, body={body}")
+        return
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = settings.MAIL_FROM
+    msg["To"] = to_email
+    msg.set_content(body)
+    if settings.SMTP_USE_SSL:
+        with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as smtp:
+            smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            smtp.send_message(msg)
+    else:
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as smtp:
+            smtp.starttls()
+            smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            smtp.send_message(msg)
+
+
+def _send_admin_activation_email(to_email: str, activation_url: str) -> None:
+    subject = "一起来拼歌管理员账户注册确认"
+    body = (
+        "感谢您注册”一起来拼歌“管理员账户，请您点击以下链接确认你的注册，如果无法打开请将链接复制到浏览器的地址栏进行访问，谢谢！\n"
+        f"{activation_url}"
+    )
+    _send_admin_email(to_email, subject, body)
+
+
+def _send_admin_email_change_email(to_email: str, confirm_url: str) -> None:
+    subject = "一起来拼歌管理员账户邮箱变更确认"
+    body = (
+        "您正在修改“一起来拼歌”管理员账户邮箱，请点击以下链接确认新邮箱，如果无法打开请将链接复制到浏览器的地址栏进行访问，谢谢！\n"
+        f"{confirm_url}"
+    )
+    _send_admin_email(to_email, subject, body)
+
+
 @router.post("/admin/register")
 async def admin_register(
+    request: Request,
     username: str = Body(...),
     password: str = Body(...),
     email: str = Body(...),
@@ -2066,10 +2130,11 @@ async def admin_register(
         raise HTTPException(status_code=400, detail="用户名至少3个字符")
     if "@" not in email:
         raise HTTPException(status_code=400, detail="请输入有效邮箱")
-    if len(password) < 6:
-        raise HTTPException(status_code=400, detail="密码至少6位")
+    _validate_admin_password(password)
     if db.query(AdminUser).filter(AdminUser.username == username).first():
         raise HTTPException(status_code=400, detail="用户名已存在")
+    if db.query(AdminUser).filter(AdminUser.email == email).first():
+        raise HTTPException(status_code=400, detail="邮箱已注册")
     code_row = None
     if invite_required:
         code_row = db.query(AdminInviteCode).filter(AdminInviteCode.code == invite_code.strip()).first()
@@ -2082,6 +2147,8 @@ async def admin_register(
         display_name=display_name.strip() or username,
         email=email,
         email_confirmed=True,
+        email_activation_token=None,
+        email_activation_expires_at=None,
         role="admin",
         status="active",
         song_limit=int(get_setting(db, "default_song_limit", 5)),
@@ -2092,12 +2159,106 @@ async def admin_register(
         code_row.status = "used"
         code_row.used_by = admin.id
         code_row.used_at = now_str()
-    log_audit(db, {"id": admin.id, "username": admin.username}, "admin_register", "admin_user", admin.id)
+    log_audit(db, {"id": admin.id, "username": admin.username}, "admin_register", "admin_user", admin.id, {"email": email, "email_activation_skipped": True})
     db.commit()
-    return {"success": True, "data": _admin_public_data(admin)}
+    return {"success": True, "message": "注册成功，请使用新账号登录。", "data": _admin_public_data(admin)}
+
+
+@router.get("/admin/activate", response_class=HTMLResponse)
+async def admin_activate(token: str = Query(...), db: Session = Depends(get_db)):
+    admin = db.query(AdminUser).filter(AdminUser.email_activation_token == token).first()
+    if not admin:
+        return HTMLResponse("<h2>激活链接无效</h2><p>请确认链接是否完整，或重新注册。</p>", status_code=400)
+    try:
+        expires_at = datetime.strptime(admin.email_activation_expires_at or "", "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        expires_at = datetime.min
+    if datetime.now() > expires_at:
+        return HTMLResponse("<h2>激活链接已过期</h2><p>注册激活链接有效时间为一天，请重新注册。</p>", status_code=400)
+    admin.email_confirmed = True
+    admin.email_activation_token = None
+    admin.email_activation_expires_at = None
+    log_audit(db, {"id": admin.id, "username": admin.username}, "admin_email_activated", "admin_user", admin.id)
+    db.commit()
+    return HTMLResponse("<h2>管理员账户已激活</h2><p>您现在可以返回管理后台登录。</p>")
+
+
+@router.put("/admin/account")
+async def admin_update_account(
+    request: Request,
+    current_password: str = Body(""),
+    new_password: str = Body(""),
+    new_email: str = Body(""),
+    db: Session = Depends(get_db),
+):
+    session_admin = verify_admin(request, db)
+    admin = db.get(AdminUser, session_admin["id"])
+    if not admin:
+        raise HTTPException(status_code=404, detail="管理员不存在")
+    detail = {}
+    if new_password:
+        _validate_admin_password(new_password)
+        admin.password_hash = hash_password(new_password)
+        detail["password_changed"] = True
+    new_email = new_email.strip()
+    if new_email and new_email != (admin.email or ""):
+        if not current_password or not verify_password(current_password, admin.password_hash):
+            raise HTTPException(status_code=403, detail="修改邮箱需要先验证当前密码")
+        exists = db.query(AdminUser).filter(AdminUser.email == new_email, AdminUser.id != admin.id).first()
+        pending_exists = db.query(AdminUser).filter(AdminUser.pending_email == new_email, AdminUser.id != admin.id).first()
+        if exists or pending_exists:
+            raise HTTPException(status_code=400, detail="邮箱已被使用")
+        if "@" not in new_email:
+            raise HTTPException(status_code=400, detail="请输入有效邮箱")
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now() + timedelta(days=1)
+        admin.pending_email = new_email
+        admin.email_change_token = token
+        admin.email_change_expires_at = expires_at.strftime("%Y-%m-%d %H:%M:%S")
+        confirm_url = _build_admin_email_change_url(request, token)
+        detail["pending_email"] = new_email
+        detail["email_change_expires_at"] = admin.email_change_expires_at
+    if not detail:
+        raise HTTPException(status_code=400, detail="没有需要更新的内容")
+    log_audit(db, session_admin, "admin_update_account", "admin_user", admin.id, detail)
+    db.commit()
+    if detail.get("pending_email"):
+        try:
+            _send_admin_email_change_email(new_email, confirm_url)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"邮箱确认邮件发送失败: {exc}")
+    data = _admin_public_data(admin)
+    ADMIN_TOKENS.update({k: {**v, **data} for k, v in ADMIN_TOKENS.items() if v.get("id") == admin.id})
+    message = "账号设置已更新"
+    if detail.get("pending_email"):
+        message = f"确认邮件已发送到{new_email}，点击邮件链接后邮箱才会变更成功。"
+    return {"success": True, "message": message, "data": data}
+
+
+@router.get("/admin/email-change/confirm", response_class=HTMLResponse)
+async def admin_confirm_email_change(token: str = Query(...), db: Session = Depends(get_db)):
+    admin = db.query(AdminUser).filter(AdminUser.email_change_token == token).first()
+    if not admin or not admin.pending_email:
+        return HTMLResponse("<h2>邮箱修改链接无效</h2><p>请确认链接是否完整，或重新发起邮箱修改。</p>", status_code=400)
+    try:
+        expires_at = datetime.strptime(admin.email_change_expires_at or "", "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        expires_at = datetime.min
+    if datetime.now() > expires_at:
+        return HTMLResponse("<h2>邮箱修改链接已过期</h2><p>邮箱修改确认链接有效时间为一天，请重新发起修改。</p>", status_code=400)
+    old_email = admin.email
+    admin.email = admin.pending_email
+    admin.email_confirmed = True
+    admin.pending_email = None
+    admin.email_change_token = None
+    admin.email_change_expires_at = None
+    log_audit(db, {"id": admin.id, "username": admin.username}, "admin_email_changed", "admin_user", admin.id, {"old_email": old_email, "new_email": admin.email})
+    db.commit()
+    return HTMLResponse("<h2>账号邮箱修改成功</h2><p>您现在可以返回管理后台继续使用。</p>")
 
 
 @router.post("/admin/login")
+
 async def admin_login(username: str = Body(...), password: str = Body(...), db: Session = Depends(get_db)):
     """管理员登录"""
     admin = db.query(AdminUser).filter(AdminUser.username == username.strip()).first()
@@ -2107,6 +2268,8 @@ async def admin_login(username: str = Body(...), password: str = Body(...), db: 
         raise HTTPException(status_code=403, detail="账户已删除")
     if admin.status == "frozen":
         raise HTTPException(status_code=403, detail="账户已冻结")
+    if admin.role != "super_admin" and not admin.email_confirmed:
+        raise HTTPException(status_code=403, detail=f"请在你的注册邮箱{admin.email or ''}中查找注册邮件，并点击激活链接。")
     admin.last_login_at = now_str()
     token = hashlib.sha256(f"{admin.id}{time.time()}{uuid.uuid4()}".encode()).hexdigest()[:32]
     ADMIN_TOKENS[token] = {**_admin_public_data(admin), "login_time": time.time()}
@@ -2139,6 +2302,37 @@ async def super_list_admins(request: Request, db: Session = Depends(get_db)):
     log_audit(db, super_admin, "super_list_admins", "admin_user", "*")
     db.commit()
     return {"success": True, "data": data}
+
+
+@router.put("/super/admins/{admin_id}")
+async def super_update_admin(admin_id: str, request: Request, db: Session = Depends(get_db)):
+    super_admin = require_super_admin(request, db)
+    admin = db.get(AdminUser, admin_id)
+    if not admin or admin.role == "super_admin":
+        raise HTTPException(status_code=404, detail="管理员不存在或不可修改")
+    body = await request.json()
+    detail = {}
+    if "song_limit" in body:
+        try:
+            admin.song_limit = max(0, int(body.get("song_limit") or 0))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="歌曲库上限必须是整数")
+        detail["song_limit"] = admin.song_limit
+    if "display_name" in body:
+        admin.display_name = str(body.get("display_name") or "").strip() or admin.username
+        detail["display_name"] = admin.display_name
+    if "email" in body:
+        email = str(body.get("email") or "").strip()
+        if email and "@" not in email:
+            raise HTTPException(status_code=400, detail="邮箱格式不正确")
+        admin.email = email
+        detail["email"] = admin.email
+    if not detail:
+        raise HTTPException(status_code=400, detail="没有可更新的字段")
+    log_audit(db, super_admin, "super_update_admin", "admin_user", admin.id, detail)
+    db.commit()
+    db.refresh(admin)
+    return {"success": True, "data": admin.to_dict()}
 
 
 @router.post("/super/admins/{admin_id}/freeze")

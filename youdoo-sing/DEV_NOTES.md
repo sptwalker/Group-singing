@@ -515,3 +515,25 @@ python -m http.server 3000 --directory frontend/public
 - `users.owner_admin_id` 与“微信用户全局保留、录音按管理员隔离”的目标存在潜在冲突，后续应调整用户/参与记录边界
 - 加密任务链接尚未实现，用户端 `/api/songs` 仍可能枚举已发布任务
 - 录音提交、点赞、上传文件访问、成曲文件访问还需要继续加固任务权限与租户边界
+
+## 十八、2026-04-27 管理员注册测试模式
+
+- 为便于本地测试，管理员注册暂时跳过邮件激活流程。
+- `/api/admin/register` 仍校验注册开关、授权码、邮箱、密码规则；注册成功后直接设置 `email_confirmed=True`，不生成激活 token，不发送 SMTP 邮件。
+- 前端注册表单增加二次密码确认，两次输入一致后才提交注册。
+- 前端注册成功提示改为“注册成功，请使用新账号登录”。
+- 单元测试已调整为验证注册后可直接登录。
+- 运行结果：`4 passed, 1 warning in 1.45s`。
+- 后续恢复正式邮件激活时，需要改回 pending 激活状态、发送激活邮件、登录未激活提示及对应测试。
+
+## 十九、2026-04-27 管理员账号设置与邮箱变更确认
+
+- 管理后台顶部栏新增 `账号设置` 按钮，管理员与超级管理员登录后均可打开账号设置弹窗。
+- `PUT /api/admin/account` 支持修改密码；新密码必须长于 6 位且包含数字和字母。
+- 修改账号邮箱时必须验证当前密码，后端先写入 `pending_email`，不立即覆盖正式邮箱。
+- 新增邮箱变更确认字段：`pending_email`、`email_change_token`、`email_change_expires_at`，旧数据库启动时自动补列。
+- 新增 `GET /api/admin/email-change/confirm?token=...`，确认链接有效期 1 天；点击后才将 `pending_email` 写入 `email` 并清理 token。
+- SMTP 未配置时，确认邮件内容会打印到服务端控制台，便于本地测试；配置真实 SMTP 后会发送实际邮件。
+- 单元测试新增账号设置覆盖：弱密码拒绝、改密后旧密码失效、新密码可登录、无密码改邮箱拒绝、邮箱 pending 状态、确认链接生效、审计日志写入。
+- 运行命令：`cmd /c "cd /d d:\Users\walker\Documents\walker\Videcode\group-singing\youdoo-sing\backend && venv\Scripts\python.exe -m pytest tests/test_admin_system.py -q"`
+- 结果：`5 passed, 1 warning in 1.68s`。
