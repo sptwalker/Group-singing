@@ -17,7 +17,7 @@ if str(BACKEND_DIR) not in sys.path:
 from app.api.routes import ADMIN_TOKENS, router
 from app.core.database import Base, SessionLocal, engine
 from app.core.multitenant import bootstrap_multitenant, hash_password
-from app.models import AdminUser, AuditLog, Recording, Segment, Song
+from app.models import AdminUser, AdminInviteCode, AuditLog, Recording, Segment, Song
 
 
 @pytest.fixture()
@@ -132,11 +132,14 @@ def test_registration_settings_invite_code_and_audit_log(client):
     )
     assert reused.status_code == 400
 
+    delete_used = client.delete("/api/super/invite-codes/used", headers=auth_header(super_admin["token"]))
+    assert delete_used.status_code == 200
+    assert delete_used.json()["data"]["deleted"] == 1
+
     with SessionLocal() as db:
-        invite_logs = db.query(AuditLog).filter(AuditLog.action == "super_create_invite_code").count()
-        register_logs = db.query(AuditLog).filter(AuditLog.action == "admin_register").count()
-    assert invite_logs == 1
-    assert register_logs == 1
+        assert db.query(AdminInviteCode).filter(AdminInviteCode.status == "used").count() == 0
+        assert db.query(AuditLog).filter(AuditLog.action == "super_delete_used_invite_codes").count() == 1
+
 
 
 def test_freeze_unfreeze_and_reset_password(client):

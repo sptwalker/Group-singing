@@ -73,7 +73,7 @@ async function renderSuperAdmins(container) {
             </div>
             <div class="table-wrap">
                 <table>
-                    <thead><tr><th>账号</th><th>角色/状态</th><th>邮箱</th><th>数据</th><th>歌曲上限</th><th>最后登录</th><th>操作</th></tr></thead>
+                    <thead><tr><th>账号</th><th>角色/状态</th><th>邮箱</th><th>数据</th><th>歌曲上限</th><th>注册时间</th><th>最后登录</th><th>操作</th></tr></thead>
                     <tbody>${admins.map(a => _renderSuperAdminRow(a)).join('')}</tbody>
                 </table>
             </div>
@@ -95,12 +95,11 @@ function _renderSuperAdminRow(a) {
         <td>${_superEscape(a.email || '-')}</td>
         <td>歌曲 ${a.song_count || 0}<br>录音 ${a.recording_count || 0}<br>成曲 ${a.final_count || 0}</td>
         <td><input class="super-song-limit" type="number" min="0" value="${a.song_limit ?? 5}" ${disabled}></td>
+        <td>${_superEscape(a.created_at || '-')}</td>
         <td>${_superEscape(a.last_login_at || '-')}</td>
         <td class="super-table-actions">
             <button class="btn btn-primary btn-xs" data-action="save-limit" ${disabled}>保存上限</button>
-            <button class="btn btn-warning btn-xs" data-action="freeze" ${disabled}>冻结登录</button>
-            <button class="btn btn-warning btn-xs" data-action="freeze-tasks" ${disabled}>冻结任务</button>
-            <button class="btn btn-success btn-xs" data-action="unfreeze" ${disabled}>解冻</button>
+            ${a.status === 'frozen' ? `<button class="btn btn-success btn-xs" data-action="unfreeze" ${disabled}>解冻</button>` : `<button class="btn btn-warning btn-xs" data-action="freeze" ${disabled}>冻结账户</button>`}
             <button class="btn btn-outline btn-xs" data-action="reset" ${disabled}>重置密码</button>
             <button class="btn btn-danger btn-xs" data-action="delete" ${disabled}>软删除</button>
             <button class="btn btn-outline btn-xs" data-action="restore" ${disabled}>恢复</button>
@@ -122,13 +121,9 @@ function _bindSuperAdminActions(container) {
                 await aPut(`/super/admins/${id}`, { song_limit: songLimit });
                 showToast('歌曲库上限已保存', 'success');
             } else if (action === 'freeze') {
-                if (!confirm('确定冻结该管理员登录？')) return;
+                if (!confirm('确定冻结该管理员账户？冻结后该管理员将无法登录。')) return;
                 await aPost(`/super/admins/${id}/freeze`, false);
-                showToast('已冻结登录', 'success');
-            } else if (action === 'freeze-tasks') {
-                if (!confirm('确定冻结该管理员登录并冻结其任务？')) return;
-                await aPost(`/super/admins/${id}/freeze`, true);
-                showToast('已冻结任务', 'success');
+                showToast('已冻结账户', 'success');
             } else if (action === 'unfreeze') {
                 await aPost(`/super/admins/${id}/unfreeze`, {});
                 showToast('已解冻', 'success');
@@ -157,41 +152,55 @@ function _bindSuperAdminActions(container) {
 
 async function renderSuperRegister(container) {
     try {
-        const [settingsRes, codesRes] = await Promise.all([aGet('/super/settings'), aGet('/super/invite-codes')]);
-        const settings = settingsRes.data || {};
-        const codes = codesRes.data || [];
-        const enabled = _superSettingValue(settings, 'admin_registration_enabled', false);
-        const inviteRequired = _superSettingValue(settings, 'admin_registration_invite_required', true);
+        const codes = (await aGet('/super/invite-codes')).data || [];
+        const unusedCount = codes.filter(c => c.status === 'unused').length;
+        const usedCount = codes.length - unusedCount;
         container.innerHTML = `
         <div class="card super-form-card">
-            <div class="card-header"><h3>注册控制</h3></div>
-            <div class="card-body">
-                <div class="field-row">
-                    <label class="super-check"><input type="checkbox" id="regEnabled" ${enabled ? 'checked' : ''}> 开放管理员注册</label>
-                    <label class="super-check"><input type="checkbox" id="inviteRequired" ${inviteRequired ? 'checked' : ''}> 注册需要授权码</label>
-                </div>
-                <button class="btn btn-primary" id="saveRegSettings">保存注册设置</button>
+            <div class="card-header">
+                <h3>授权码管理</h3>
+                <span>${codes.length} 个，未使用 ${unusedCount} 个，已使用 ${usedCount} 个</span>
+            </div>
+            <div class="card-body super-code-toolbar">
                 <button class="btn btn-success" id="createInviteCode">生成授权码</button>
+                <label class="field compact-field">
+                    <span>筛选</span>
+                    <select id="inviteCodeFilter">
+                        <option value="all">显示所有授权码</option>
+                        <option value="unused">只显示未使用授权码</option>
+                    </select>
+                </label>
+                <button class="btn btn-danger" id="deleteUsedInviteCodes" ${usedCount ? '' : 'disabled'}>删除已使用授权码记录</button>
             </div>
         </div>
         <div class="card">
-            <div class="card-header"><h3>授权码列表</h3><span>${codes.length} 个</span></div>
+            <div class="card-header"><h3>授权码列表</h3><span id="inviteCodeCount"></span></div>
             <div class="table-wrap"><table>
                 <thead><tr><th>授权码</th><th>状态</th><th>使用人</th><th>创建时间</th><th>使用时间</th></tr></thead>
-                <tbody>${codes.map(c => `<tr><td><code>${_superEscape(c.code)}</code></td><td>${c.status === 'unused' ? '<span class="badge badge-completed">未使用</span>' : '<span class="badge badge-unassigned">已使用</span>'}</td><td>${_superEscape(c.used_by || '-')}</td><td>${_superEscape(c.created_at || '-')}</td><td>${_superEscape(c.used_at || '-')}</td></tr>`).join('')}</tbody>
+                <tbody id="inviteCodeTbody"></tbody>
             </table></div>
         </div>`;
-        document.getElementById('saveRegSettings').onclick = async () => {
-            await aPut('/super/settings', {
-                admin_registration_enabled: document.getElementById('regEnabled').checked,
-                admin_registration_invite_required: document.getElementById('inviteRequired').checked,
-            });
-            showToast('注册设置已保存', 'success');
-            renderSuperRegister(container);
+        const tbody = document.getElementById('inviteCodeTbody');
+        const filter = document.getElementById('inviteCodeFilter');
+        const count = document.getElementById('inviteCodeCount');
+        const renderRows = () => {
+            const filtered = filter.value === 'unused' ? codes.filter(c => c.status === 'unused') : codes;
+            count.textContent = `${filtered.length} 条`;
+            tbody.innerHTML = filtered.length
+                ? filtered.map(c => `<tr><td><code>${_superEscape(c.code)}</code></td><td>${c.status === 'unused' ? '<span class="badge badge-completed">未使用</span>' : '<span class="badge badge-unassigned">已使用</span>'}</td><td>${_superEscape(c.used_by || '-')}</td><td>${_superEscape(c.created_at || '-')}</td><td>${_superEscape(c.used_at || '-')}</td></tr>`).join('')
+                : '<tr><td colspan="5" class="muted">暂无授权码记录</td></tr>';
         };
+        filter.onchange = renderRows;
+        renderRows();
         document.getElementById('createInviteCode').onclick = async () => {
             const res = await aPost('/super/invite-codes', {});
             showToast(`授权码已生成：${res.data.code}`, 'success');
+            renderSuperRegister(container);
+        };
+        document.getElementById('deleteUsedInviteCodes').onclick = async () => {
+            if (!confirm(`确定删除 ${usedCount} 条已使用授权码记录？此操作不会删除已注册管理员。`)) return;
+            const res = await aDel('/super/invite-codes/used');
+            showToast(res.message || '已使用授权码记录已删除', 'success');
             renderSuperRegister(container);
         };
     } catch (e) {
@@ -202,7 +211,18 @@ async function renderSuperRegister(container) {
 async function renderSuperSettings(container) {
     try {
         const settings = (await aGet('/super/settings')).data || {};
+        const enabled = _superSettingValue(settings, 'admin_registration_enabled', false);
+        const inviteRequired = _superSettingValue(settings, 'admin_registration_invite_required', true);
         container.innerHTML = `
+        <div class="card super-form-card">
+            <div class="card-header"><h3>注册设置</h3></div>
+            <div class="card-body">
+                <div class="field-row">
+                    <label class="super-check"><input type="checkbox" id="regEnabled" ${enabled ? 'checked' : ''}> 开放管理员注册</label>
+                    <label class="super-check"><input type="checkbox" id="inviteRequired" ${inviteRequired ? 'checked' : ''}> 注册需要授权码</label>
+                </div>
+            </div>
+        </div>
         <div class="card super-form-card">
             <div class="card-header"><h3>系统参数</h3></div>
             <div class="card-body">
@@ -210,16 +230,18 @@ async function renderSuperSettings(container) {
                     <div class="field"><label>默认歌曲库上限</label><input type="number" id="defaultSongLimit" min="0" value="${_superSettingValue(settings, 'default_song_limit', 5)}"></div>
                     <div class="field"><label>最终合成功能</label><select id="finalMixEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
                 </div>
-                <button class="btn btn-primary" id="saveSystemSettings">保存系统参数</button>
+                <button class="btn btn-primary" id="saveSystemSettings">保存系统设置</button>
             </div>
         </div>`;
         document.getElementById('finalMixEnabled').value = String(_superSettingValue(settings, 'final_mix_enabled', true));
         document.getElementById('saveSystemSettings').onclick = async () => {
             await aPut('/super/settings', {
+                admin_registration_enabled: document.getElementById('regEnabled').checked,
+                admin_registration_invite_required: document.getElementById('inviteRequired').checked,
                 default_song_limit: parseInt(document.getElementById('defaultSongLimit').value || '5', 10),
                 final_mix_enabled: document.getElementById('finalMixEnabled').value === 'true',
             });
-            showToast('系统参数已保存', 'success');
+            showToast('系统设置已保存', 'success');
             renderSuperSettings(container);
         };
     } catch (e) {

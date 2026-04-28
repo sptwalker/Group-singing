@@ -171,9 +171,9 @@ const SUPER_MENU = [
     ['superDashboard', '🛡️', '超级首页'],
     ['superAdmins', '👥', '管理员管理'],
     ['superRegister', '🔐', '注册与授权码'],
-    ['superSettings', '⚙️', '系统设置'],
     ['superStats', '📈', '服务器统计'],
     ['superFinals', '🎧', '全局成曲'],
+    ['superSettings', '⚙️', '系统设置'],
 ];
 
 function renderAdminMenu() {

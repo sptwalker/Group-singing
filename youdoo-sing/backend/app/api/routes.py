@@ -2490,6 +2490,15 @@ async def super_list_invite_codes(request: Request, db: Session = Depends(get_db
     return {"success": True, "data": [r.to_dict() for r in rows]}
 
 
+@router.delete("/super/invite-codes/used")
+async def super_delete_used_invite_codes(request: Request, db: Session = Depends(get_db)):
+    super_admin = require_super_admin(request, db)
+    deleted = db.query(AdminInviteCode).filter(AdminInviteCode.status == "used").delete(synchronize_session=False)
+    log_audit(db, super_admin, "super_delete_used_invite_codes", "invite_code", "used", {"deleted": int(deleted or 0)})
+    db.commit()
+    return {"success": True, "message": f"已删除{int(deleted or 0)}条已使用授权码记录", "data": {"deleted": int(deleted or 0)}}
+
+
 @router.get("/super/stats")
 async def super_stats(request: Request, db: Session = Depends(get_db)):
     require_super_admin(request, db)

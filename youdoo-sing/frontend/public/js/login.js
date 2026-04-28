@@ -16,10 +16,6 @@
 
     const btnLogin = document.getElementById('btnLogin');
     const songList = document.getElementById('songList');
-    const btnPasswordLogin = document.getElementById('btnPasswordLogin');
-    const btnRegister = document.getElementById('btnRegister');
-    const inputUsername = document.getElementById('inputUsername');
-    const inputPassword = document.getElementById('inputPassword');
 
     loadSongPreview();
 
@@ -47,39 +43,6 @@
             songList.innerHTML = '<div class="song-item"><div class="song-info"><span class="song-emoji">&#9888;</span><div><div class="song-name">服务连接中...</div></div></div></div>';
         }
     }
-
-    async function doPasswordAuth(isRegister) {
-        const username = (inputUsername.value || '').trim();
-        const password = (inputPassword.value || '').trim();
-        if (!username || !password) {
-            showToast('请输入用户名和密码');
-            return;
-        }
-        const fd = new FormData();
-        fd.append('username', username);
-        fd.append('password', password);
-        const endpoint = isRegister ? '/auth/register' : '/auth/login';
-        try {
-            const res = await fetch(`${API_BASE}${endpoint}`, {
-                method: 'POST',
-                body: fd,
-                credentials: 'include',
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || (isRegister ? '注册失败' : '登录失败'));
-            _currentUser = data.data;
-            window.location.href = getPendingLoginTarget('task.html', true);
-        } catch (e) {
-            showToast(e.message);
-        }
-    }
-
-    btnPasswordLogin.addEventListener('click', () => doPasswordAuth(false));
-    btnRegister.addEventListener('click', () => doPasswordAuth(true));
-
-    inputPassword.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') doPasswordAuth(false);
-    });
 
     async function handleWechatLogin() {
         setPendingLoginTarget('task.html');
