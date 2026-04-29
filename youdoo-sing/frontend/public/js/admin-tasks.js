@@ -7,7 +7,7 @@ let _taskSelectedIsChorus = false;
 async function renderTasks(container) {
     try {
         const songsRes = await aGet('/admin/songs');
-        _taskSongs = songsRes.data;
+        _taskSongs = (songsRes.data || []).filter(s => s.task_published);
         container.innerHTML = `
         <div class="editor-toolbar" style="margin-bottom:16px;">
             <label style="font-weight:600;font-size:13px;">选择歌曲：</label>
@@ -67,9 +67,9 @@ async function loadTaskSegments() {
             (r.data.segments || []).forEach(seg => _taskAllSegs.push({ ...seg, songTitle: s.title, songId: s.id }));
             // 加载自由任务
             if (r.data.free_tasks) {
-                (r.data.free_tasks || []).forEach(ft => _taskAllSegs.push({
-                    id: ft.id, index: 'F', lyrics: ft.description || '自由任务',
-                    is_chorus: false, difficulty: ft.difficulty || 'normal',
+                (r.data.free_tasks || []).forEach((ft, fi) => _taskAllSegs.push({
+                    id: ft.id, index: `F${fi + 1}`, lyrics: ft.description || '自由任务',
+                    is_chorus: ft.type === 'chorus', difficulty: ft.difficulty || 'normal',
                     start_time: ft.start_time, end_time: ft.end_time,
                     claim_count: 0, recordings: ft.recordings || [], status: 'free_task',
                     songTitle: s.title, songId: s.id, _isFreeTask: true, _freeTask: ft,
@@ -88,7 +88,7 @@ async function loadTaskSegments() {
             const isActive = seg.id === _taskSelectedSegId;
             if (seg._isFreeTask) {
                 return `<tr class="task-seg-row task-seg-free${isActive ? ' task-seg-active' : ''}" data-seg-id="${seg.id}" data-is-chorus="0" data-is-free="1">
-                <td><span title="自由任务">F</span></td>
+                <td><span title="自由任务">${seg.index}</span></td>
                 <td>${seg.songTitle}</td>
                 <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🎵 ${seg.lyrics||'--'}</td>
                 <td><span class="badge badge-free">自由</span></td>
@@ -97,6 +97,7 @@ async function loadTaskSegments() {
                 <td>--</td>
                 <td>${(seg.recordings||[]).length} 条</td>
                 <td>
+                    <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();editFreeTask('${seg.songId}','${seg.id}')">编辑</button>
                     <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteFreeTask('${seg.songId}','${seg.id}')">删除</button>
                 </td>
             </tr>`;
@@ -250,6 +251,58 @@ function _showFreeTaskDialog() {
             loadTaskSegments();
         } catch(e) { errEl.textContent=e.message; errEl.style.display=''; }
     });
+}
+
+async function editFreeTask(songId, freeTaskId) {
+    const seg = _taskAllSegs.find(s => s._isFreeTask && s.id === freeTaskId && s.songId === songId);
+    if (!seg) return;
+    const ft = seg._freeTask || seg;
+    showModal('编辑自由任务', `
+        <div style="display:flex;flex-direction:column;gap:12px;">
+            <div><label>描述文字：</label><input type="text" id="ftEditDesc" value="${_escapeAttr(ft.description || seg.lyrics || '')}" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;"></div>
+            <div style="display:flex;gap:8px;"><div style="flex:1;">
+                <label>开始时间（秒）：</label><input type="number" id="ftEditStart" min="0" step="0.5" value="${Number(ft.start_time ?? seg.start_time) || 0}" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;"></div>
+                <div style="flex:1;">
+                <label>结束时间（秒）：</label><input type="number" id="ftEditEnd" min="0" step="0.5" value="${Number(ft.end_time ?? seg.end_time) || 0}" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;"></div>
+            </div>
+            <div style="display:flex;gap:8px;"><div style="flex:1;">
+                <label>难度：</label><select id="ftEditDiff" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;">
+                    <option value="easy" ${(ft.difficulty || seg.difficulty) === 'easy' ? 'selected' : ''}>简</option>
+                    <option value="normal" ${(ft.difficulty || seg.difficulty) === 'normal' ? 'selected' : ''}>中</option>
+                    <option value="hard" ${(ft.difficulty || seg.difficulty) === 'hard' ? 'selected' : ''}>难</option>
+                </select></div>
+                <div style="flex:1;">
+                <label>类型：</label><select id="ftEditType" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:6px;">
+                    <option value="solo" ${(ft.type || 'solo') === 'solo' ? 'selected' : ''}>独唱</option>
+                    <option value="chorus" ${ft.type === 'chorus' ? 'selected' : ''}>合唱</option>
+                </select></div>
+            </div>
+            <p id="ftEditError" style="color:#ef4444;font-size:12px;display:none;margin:0;"></p>
+        </div>
+    `, `<button class="btn-login" id="btnFtSave">保 存</button>`);
+    document.getElementById('btnFtSave').addEventListener('click', async () => {
+        const desc = document.getElementById('ftEditDesc').value.trim();
+        const start = parseFloat(document.getElementById('ftEditStart').value);
+        const end = parseFloat(document.getElementById('ftEditEnd').value);
+        const diff = document.getElementById('ftEditDiff').value;
+        const type = document.getElementById('ftEditType').value;
+        const errEl = document.getElementById('ftEditError');
+
+        if (!desc) { errEl.textContent='请输入描述文字'; errEl.style.display=''; return; }
+        if (isNaN(start) || isNaN(end)) { errEl.textContent='请输入有效的时间范围'; errEl.style.display=''; return; }
+        if (end - start < 5) { errEl.textContent='时间间隔至少需要5秒'; errEl.style.display=''; return; }
+
+        try {
+            await aPut(`/admin/songs/${songId}/free-tasks/${freeTaskId}`, { description: desc, start_time: start, end_time: end, difficulty: diff, type: type });
+            showToast('自由任务已更新', 'success');
+            closeModal();
+            loadTaskSegments();
+        } catch(e) { errEl.textContent=e.message; errEl.style.display=''; }
+    });
+}
+
+function _escapeAttr(value) {
+    return String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 async function deleteFreeTask(songId, freeTaskId) {
@@ -574,7 +627,7 @@ async function _expPlayRecWithFx(idx) {
     if (!rec) return;
 
     const ctx = _expGetAudioCtx();
-    const url = _expBuildUrl(rec.audio_url);
+    const url = _expBuildUrl(_expGetRecAudioUrl(rec));
 
     // 加载或使用缓存的 AudioBuffer
     if (!_expFxBuffers[idx]) {
@@ -723,13 +776,12 @@ const EXP_MIN_SEG_PX = 90; // 最小唱段像素宽度，确保能放迷你卡�
 async function renderExport(container) {
     try {
         const songsRes = await aGet('/admin/songs');
-        const songs = songsRes.data;
+        const songs = songsRes.data || [];
         container.innerHTML = `
         <div class="export-toolbar">
             <label style="font-weight:600;font-size:13px;">选择歌曲：</label>
             <select id="expSongSel">
-                <option value="">-- 选择歌曲 --</option>
-                ${songs.map(s => `<option value="${s.id}">${s.title} - ${s.artist} (${s.completion||0}%)</option>`).join('')}
+                ${songs.length ? songs.map(s => `<option value="${s.id}">${s.title} - ${s.artist} (${s.completion||0}%)</option>`).join('') : '<option value="" disabled>暂无歌曲</option>'}
             </select>
             <label class="btn btn-outline btn-sm acc-upload-btn" id="expAccBtn" style="display:none;">
                 上传伴奏<input type="file" accept=".mp3,.wav,.flac,.ogg,.m4a" id="expAccFile">
@@ -745,6 +797,7 @@ async function renderExport(container) {
         document.getElementById('expSongSel').addEventListener('change', _expLoadSong);
         document.getElementById('expSynthBtn').addEventListener('click', _expStartSynth);
         document.getElementById('expAccFile').addEventListener('change', _expUploadAcc);
+        if (songs.length) _expLoadSong();
     } catch (e) { container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>${e.message}</p></div>`; }
 }
 
@@ -976,8 +1029,8 @@ function _expRenderWavePanel() {
         if (host && _expAudio) {
             const dur = _expAudio.duration || _expSong?.duration || 0;
             if (dur) {
-                const hostRect = host.getBoundingClientRect();
-                const x = e.clientX - hostRect.left + scrollEl.scrollLeft;
+        const hostRect = host.getBoundingClientRect();
+                const x = e.clientX - hostRect.left;
                 const hostW = host.scrollWidth || host.clientWidth || 1;
                 const ratio = Math.max(0, Math.min(1, x / hostW));
                 _expAudio.currentTime = ratio * dur;
@@ -1044,7 +1097,7 @@ function _expBindCursorHandleDrag(scrollEl) {
         const dur = _expAudio.duration || _expSong?.duration || 0;
         if (!dur) return;
         const hostRect = host.getBoundingClientRect();
-        const x = e.clientX - hostRect.left + scrollEl.scrollLeft;
+        const x = e.clientX - hostRect.left;
         const hostW = host.scrollWidth || host.clientWidth || 1;
         const ratio = Math.max(0, Math.min(1, x / hostW));
         _expAudio.currentTime = ratio * dur;
@@ -1205,6 +1258,27 @@ function _expRenderFreeTrack() {
     }).join('');
 }
 
+function _expGetRecTimelineStart(seg, rec) {
+    return rec._startOffset != null ? Number(rec._startOffset) || 0 : (seg?.start_time || 0);
+}
+
+function _expGetRecTimelineDuration(seg, rec) {
+    const segDur = Math.max(0.1, (seg?.end_time || 0) - (seg?.start_time || 0));
+    return Math.max(0.1, Number(rec.duration || rec.audio_duration || rec.score_detail?.duration || rec._duration || segDur) || segDur);
+}
+
+function _expGetRecTimelineEnd(seg, rec) {
+    return _expGetRecTimelineStart(seg, rec) + _expGetRecTimelineDuration(seg, rec);
+}
+
+function _expGetRecAudioUrl(rec) {
+    const url = rec?.audio_url || '';
+    if (!url) return '';
+    const ver = rec._audioVersion || rec.updated_at || '';
+    if (!ver) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(ver);
+}
+
 function _expRenderOverlay() {
     const ov = document.getElementById('expOverlay');
     if (!ov) return;
@@ -1214,26 +1288,61 @@ function _expRenderOverlay() {
     const widthPx = hostEl?.scrollWidth || hostEl?.clientWidth || 0;
     if (!dur || !widthPx) { ov.innerHTML = ''; return; }
 
-    ov.innerHTML = _expSegs.map((seg, i) => {
+    const segHtml = _expSegs.map((seg, i) => {
         const left = (seg.start_time / dur) * widthPx;
         const w = Math.max(((seg.end_time - seg.start_time) / dur) * widthPx, 2);
         const color = EXP_SEG_COLORS[i % EXP_SEG_COLORS.length];
         const isActive = i === _expActiveSegIdx;
-        const selectedRecs = (seg._recs || []).filter(r => r.selected);
-        const miniCards = selectedRecs.slice(0, 5).map((r, ri) =>
-            `<span class="mini-rec-capsule" data-seg="${i}" data-rec-id="${r.id}" title="${r.user_name}">
-                <span class="mini-wave" id="expMiniW${i}_${ri}"></span>
-                <span class="mini-name">${r.user_name}</span>
-            </span>`
-        ).join('');
-        const extra = selectedRecs.length > 5 ? `<span class="mini-rec-capsule" style="background:rgba(255,255,255,.7);">+${selectedRecs.length-5}</span>` : '';
         return `<div class="export-seg-block${isActive?' active':''}" data-idx="${i}"
             style="left:${left}px;width:${w}px;background:${color};">
             <span class="seg-label">${seg.index}. ${seg.lyrics||''}</span>
             <span class="seg-type-badge ${seg.is_chorus?'chorus':'solo'}">${seg.is_chorus?'合唱':'独唱'}</span>
-            <div style="display:flex;flex-wrap:wrap;gap:2px;padding:0 2px;">${miniCards}${extra}</div>
         </div>`;
     }).join('');
+
+    const recItems = [];
+    _expSegs.forEach((seg, i) => {
+        const selectedRecs = (seg._recs || []).filter(r => r.selected).slice(0, 5);
+        selectedRecs.forEach((r, ri) => {
+            const start = Math.max(0, Math.min(dur, _expGetRecTimelineStart(seg, r)));
+            const recDur = _expGetRecTimelineDuration(seg, r);
+            const left = (start / dur) * widthPx;
+            const w = Math.max((recDur / dur) * widthPx, 48);
+            const safeW = Math.min(w, widthPx - left);
+            recItems.push({
+                left, width: safeW, right: left + safeW, segIdx: i, recIdx: ri, rec: r,
+                html: laneTop => `<span class="mini-rec-capsule" data-seg="${i}" data-rec-id="${r.id}"
+                    title="${r.user_name} ${fmtTimePrecise(start)}-${fmtTimePrecise(Math.min(dur, start + recDur))}"
+                    style="left:${left}px;width:${safeW}px;top:${laneTop}px;">
+                    <span class="mini-wave" id="expMiniW${i}_${ri}"></span>
+                    <span class="mini-name">${r.user_name}</span>
+                </span>`
+            });
+        });
+        const selectedCount = (seg._recs || []).filter(r => r.selected).length;
+        if (selectedCount > 5) {
+            const left = (seg.start_time / dur) * widthPx;
+            recItems.push({
+                left, width: 48, right: left + 48, segIdx: i, recIdx: 5, rec: null,
+                html: laneTop => `<span class="mini-rec-capsule mini-rec-extra" style="left:${left}px;top:${laneTop}px;width:48px;">+${selectedCount - 5}</span>`
+            });
+        }
+    });
+
+    const recHtml = [];
+    const laneEnds = [];
+    recItems.sort((a, b) => a.left - b.left || a.segIdx - b.segIdx || a.recIdx - b.recIdx);
+    recItems.forEach(item => {
+        const gap = 8;
+        let lane = laneEnds.findIndex(end => item.left >= end + gap);
+        if (lane < 0) {
+            lane = laneEnds.length < 6 ? laneEnds.length : laneEnds.indexOf(Math.min(...laneEnds));
+        }
+        laneEnds[lane] = Math.max(laneEnds[lane] || 0, item.right);
+        recHtml.push(item.html(54 + lane * 22));
+    });
+
+    ov.innerHTML = segHtml + recHtml.join('');
 
     // 绑定唱段块点击
     ov.querySelectorAll('.export-seg-block').forEach(el => {
@@ -1274,8 +1383,10 @@ function _expShowMiniRecOps(segIdx, recId) {
     const gain = rec._gain || 0;
     const reverb = rec._reverb || 0;
     const fadeOut = rec._fadeOut || 0;
-    const startT = rec._startOffset != null ? rec._startOffset : seg.start_time;
-    const endT = rec._endOffset != null ? rec._endOffset : seg.end_time;
+    const startT = _expGetRecTimelineStart(seg, rec);
+    const durationT = _expGetRecTimelineDuration(seg, rec);
+    rec._startOffset = startT;
+    rec._endOffset = startT + durationT;
 
     // 高亮当前胶囊
     document.querySelectorAll('.mini-rec-capsule').forEach(el => el.classList.remove('mini-active'));
@@ -1296,9 +1407,9 @@ function _expShowMiniRecOps(segIdx, recId) {
                 <label>起始</label>
                 <input type="number" class="mini-ops-input" id="miniOpsStart" value="${startT.toFixed(2)}" step="0.1" min="0">
             </div>
-            <div class="mini-ops-group">
-                <label>结束</label>
-                <input type="number" class="mini-ops-input" id="miniOpsEnd" value="${endT.toFixed(2)}" step="0.1" min="0">
+            <div class="mini-ops-group mini-ops-duration">
+                <label>时长</label>
+                <span class="mini-ops-duration-val" id="miniOpsDuration">${fmtTimePrecise(durationT)}</span>
             </div>
             <div class="mini-ops-sep"></div>
             <div class="mini-ops-group">
@@ -1345,12 +1456,19 @@ function _expBindMiniOpsEvents(segIdx, recId) {
         if (idx >= 0) _expPlayRec(idx);
     });
 
-    // 起止时间
+    // 起始时间：保持录音时长不变，结束时间自动同步
     document.getElementById('miniOpsStart')?.addEventListener('change', e => {
-        rec._startOffset = Math.max(0, parseFloat(e.target.value) || 0);
-    });
-    document.getElementById('miniOpsEnd')?.addEventListener('change', e => {
-        rec._endOffset = Math.max(0, parseFloat(e.target.value) || 0);
+        const dur = _expGetRecTimelineDuration(seg, rec);
+        const songDur = _expSong?.duration || 0;
+        const maxStart = songDur > dur ? songDur - dur : 0;
+        const start = Math.max(0, Math.min(maxStart, parseFloat(e.target.value) || 0));
+        rec._startOffset = start;
+        rec._endOffset = start + dur;
+        e.target.value = start.toFixed(2);
+        _expRenderOverlay();
+        _expPrepareRecAudios();
+        _expMiniOpsRecId = null;
+        _expShowMiniRecOps(segIdx, recId);
     });
 
     // 升降调
@@ -1427,7 +1545,7 @@ function _expInitMiniWS() {
                 container: el, waveColor:'rgba(100,116,139,.5)', progressColor:'#4f46e5',
                 cursorWidth:1, cursorColor:'#ef4444', height:14, barWidth:1, barGap:1,
                 normalize:true, interact:false, hideScrollbar:true,
-                url: _expBuildUrl(r.audio_url)
+                url: _expBuildUrl(_expGetRecAudioUrl(r))
             });
             ws._recId = r.id;
             _expMiniWS.push(ws);
@@ -1727,6 +1845,10 @@ async function _expConfirmTrim(idx, btn) {
         try {
             btn.disabled = true;
             btn.textContent = '⏳';
+            rec._trimStart = trimStart;
+            rec._trimEnd = trimEnd;
+            rec._audioVersion = Date.now();
+
             await aPost(`/admin/recordings/${rec.id}/trim`, {
                 trim_start: trimStart,
                 trim_end: trimEnd
@@ -1772,7 +1894,7 @@ function _expInitRecWS(recs) {
             container: el, waveColor:'rgba(100,116,139,.4)', progressColor:'#4f46e5',
             cursorWidth:1, cursorColor:'#ef4444', height:32, barWidth:2, barGap:1, barRadius:1,
             normalize:true, interact:true, hideScrollbar:true,
-            url: _expBuildUrl(r.audio_url)
+            url: _expBuildUrl(_expGetRecAudioUrl(r))
         });
         ws._recData = r;
         ws.on('finish', () => {
@@ -1838,8 +1960,25 @@ function _expPlayRecById(recId) {
 async function _expRefreshSegRecs() {
     if (!_expSong) return;
     try {
+        const prevById = new Map();
+        _expSegs.forEach(seg => {
+            (seg._recs || []).forEach(r => {
+                prevById.set(r.id, {
+                    _pitchShift: r._pitchShift,
+                    _reverb: r._reverb,
+                    _gain: r._gain,
+                    _fadeOut: r._fadeOut,
+                    _trimStart: r._trimStart,
+                    _trimEnd: r._trimEnd,
+                    _startOffset: r._startOffset,
+                    _endOffset: r._endOffset,
+                    _duration: r._duration,
+                    _audioVersion: r._audioVersion,
+                });
+            });
+        });
         const recRes = await aGet(`/admin/recordings?song_id=${_expSong.id}`);
-        const allRecs = recRes.data || [];
+        const allRecs = (recRes.data || []).map(r => Object.assign(r, prevById.get(r.id) || {}));
         _expSegs.forEach(seg => {
             seg._recs = allRecs.filter(r => r.segment_id === seg.id && r.submitted);
         });
@@ -1883,6 +2022,8 @@ async function _expStartSynth() {
                     gain: r._gain || 0,
                     trimStart: r._trimStart || 0,
                     trimEnd: r._trimEnd || 0,
+                    startOffset: _expGetRecTimelineStart(seg, r),
+                    duration: _expGetRecTimelineDuration(seg, r),
                 };
             }
         });
@@ -1995,10 +2136,10 @@ function _expPrepareRecAudios() {
     _expSegs.forEach(seg => {
         const selectedRecs = (seg._recs || []).filter(r => r.selected);
         selectedRecs.forEach(r => {
-            const a = new Audio(_expBuildUrl(r.audio_url));
+            const a = new Audio(_expBuildUrl(_expGetRecAudioUrl(r)));
             a.crossOrigin = 'anonymous';
             a.preload = 'auto';
-            a._segStartTime = seg.start_time || 0;
+            a._segStartTime = _expGetRecTimelineStart(seg, r);
             _expRecAudios.push(a);
         });
     });

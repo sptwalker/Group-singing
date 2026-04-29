@@ -101,9 +101,9 @@ function _renderSuperAdminRow(a) {
             <button class="btn btn-primary btn-xs" data-action="save-limit" ${disabled}>保存上限</button>
             ${a.status === 'frozen' ? `<button class="btn btn-success btn-xs" data-action="unfreeze" ${disabled}>解冻</button>` : `<button class="btn btn-warning btn-xs" data-action="freeze" ${disabled}>冻结账户</button>`}
             <button class="btn btn-outline btn-xs" data-action="reset" ${disabled}>重置密码</button>
-            <button class="btn btn-danger btn-xs" data-action="delete" ${disabled}>软删除</button>
-            <button class="btn btn-outline btn-xs" data-action="restore" ${disabled}>恢复</button>
-            <button class="btn btn-danger btn-xs" data-action="purge" ${disabled}>清理数据</button>
+            ${a.status === 'deleted'
+                ? `<button class="btn btn-outline btn-xs" data-action="restore" ${disabled}>恢复删除</button><button class="btn btn-danger btn-xs" data-action="purge" ${disabled}>彻底删除</button>`
+                : `<button class="btn btn-danger btn-xs" data-action="delete" ${disabled}>软删除</button>`}
         </td>
     </tr>`;
 }
@@ -139,9 +139,9 @@ function _bindSuperAdminActions(container) {
                 await aPost(`/super/admins/${id}/restore`, {});
                 showToast('已恢复', 'success');
             } else if (action === 'purge') {
-                if (!confirm('确定永久清理该软删除账户及其歌曲、录音、成曲文件？此操作不可恢复。')) return;
+                if (!confirm('确定彻底删除该软删除账户及其歌曲、录音、成曲文件？此操作不可恢复。')) return;
                 await aDel(`/super/admins/${id}/purge-data`);
-                showToast('数据已清理', 'success');
+                showToast('已彻底删除', 'success');
             }
             renderSuperAdmins(container);
         } catch (err) {

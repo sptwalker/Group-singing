@@ -1421,12 +1421,13 @@ tbody tr:last-child td { border-bottom: none; }
 .export-seg-block .seg-type-badge.solo { background:rgba(59,130,246,.8); }
 .export-seg-block .seg-type-badge.chorus { background:rgba(219,39,119,.8); }
 
-/* 迷你胶囊录音卡片（覆盖在唱段块上） */
-.mini-rec-capsule { display:inline-flex; align-items:center; gap:3px; background:rgba(255,255,255,.9); border-radius:10px; padding:1px 6px 1px 4px; font-size:9px; color:#334155; cursor:pointer; pointer-events:all; white-space:nowrap; max-width:100%; box-shadow:0 1px 3px rgba(0,0,0,.2); line-height:16px; }
+/* 迷你胶囊录音卡片（按全曲时间轴覆盖在波形上） */
+.mini-rec-capsule { position:absolute; display:inline-flex; align-items:center; gap:3px; background:rgba(255,255,255,.92); border-radius:10px; padding:1px 6px 1px 4px; font-size:9px; color:#334155; cursor:pointer; pointer-events:all; white-space:nowrap; max-width:none; box-shadow:0 1px 3px rgba(0,0,0,.2); line-height:16px; overflow:hidden; z-index:4; }
 .mini-rec-capsule:hover { background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.3); }
-.mini-rec-capsule .mini-wave { width:36px; height:14px; border-radius:3px; overflow:hidden; flex-shrink:0; }
+.mini-rec-capsule .mini-wave { width:36px; height:14px; border-radius:3px; overflow:hidden; flex:1 1 auto; min-width:18px; }
 .mini-rec-capsule .mini-play { width:14px; height:14px; border-radius:50%; background:var(--primary); color:#fff; display:flex; align-items:center; justify-content:center; font-size:7px; flex-shrink:0; cursor:pointer; }
-.mini-rec-capsule .mini-name { overflow:hidden; text-overflow:ellipsis; max-width:50px; }
+.mini-rec-capsule .mini-name { overflow:hidden; text-overflow:ellipsis; max-width:52px; flex-shrink:0; }
+.mini-rec-extra { justify-content:center; font-weight:600; background:rgba(255,255,255,.75); }
 
 /* 底部录音详情区 */
 .export-rec-panel { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; }

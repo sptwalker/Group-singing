@@ -102,15 +102,10 @@
     let displayStart, displayEnd, displaySegments;
 
     if (isFreeTask) {
-        mySegIdx = -1; // 自由任务不在唱段列表中
-        // 显示自由任务时间范围附近的歌词（如果有）
-        displayStart = Math.max(0, allSegments.findIndex(s => s.start_time >= segment.start_time) - 2);
-        if (displayStart < 0 && allSegments.length > 0) displayStart = 0;
-        displayEnd = Math.min(allSegments.length - 1, allSegments.findIndex(s => s.start_time >= segment.end_time) + 1);
-        if (displayEnd < displayStart || displayEnd < 0) {
-            displayEnd = Math.min(allSegments.length - 1, displayStart + 4);
-        }
-        displaySegments = allSegments.slice(displayStart, displayEnd + 1);
+        mySegIdx = -1;
+        displayStart = 0;
+        displayEnd = -1;
+        displaySegments = [];
     } else {
         mySegIdx = allSegments.findIndex(s => s.id === segment.id);
         // 显示范围：前3段+后1段（共5行）
@@ -122,6 +117,10 @@
     renderLyrics();
 
     function renderLyrics() {
+        if (isFreeTask) {
+            lyricsSection.innerHTML = '<div class="empty-recordings" style="margin:40px 20px;text-align:center;">自由任务录音不显示歌词，请按指定时间范围自由演唱。</div>';
+            return;
+        }
         lyricsSection.innerHTML = displaySegments.map((seg, i) => {
             const globalIdx = displayStart + i;
             let cls = 'lyric-line';

@@ -1605,6 +1605,7 @@ async def get_song(song_id: str, db: Session = Depends(get_db)):
     """获取已发布任务歌曲详情（含唱段）"""
     song = _get_active_song_for_user(db, song_id)
     data = song.to_dict(include_segments=True)
+    data["free_tasks"] = [ft.to_dict() for ft in song.free_tasks]
     data["published_final"] = _published_final_brief(db, song_id, full=True, owner_admin_id=song.owner_admin_id)
     data["completion"] = _calc_completion_orm(db, song)
     data["participant_count"] = _calc_participant_count_orm(db, song_id, song.owner_admin_id)
@@ -1762,8 +1763,15 @@ async def upload_recording(
 
     seg = db.get(Segment, segment_id)
     song = db.get(Song, song_id)
-    if not seg or not song or seg.song_id != song_id:
-        raise HTTPException(status_code=404, detail="唱段不存在")
+    if not song:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if seg:
+        if seg.song_id != song_id:
+            raise HTTPException(status_code=404, detail="唱段不存在")
+    else:
+        free_task = db.query(FreeTask).filter(FreeTask.id == segment_id, FreeTask.song_id == song_id).first()
+        if not free_task:
+            raise HTTPException(status_code=404, detail="唱段不存在")
     if song.owner_admin_id:
         admin = db.get(AdminUser, song.owner_admin_id)
         if not admin or admin.status != "active" or admin.freeze_tasks:
@@ -1885,10 +1893,15 @@ async def get_recordings(
         q = q.filter(Recording.song_id == song_id, Recording.owner_admin_id == song.owner_admin_id)
     if segment_id:
         seg = db.get(Segment, segment_id)
-        if not seg:
-            raise HTTPException(status_code=404, detail="唱段不存在")
-        _get_active_song_for_user(db, seg.song_id)
-        q = q.filter(Recording.segment_id == segment_id, Recording.owner_admin_id == seg.owner_admin_id)
+        if seg:
+            _get_active_song_for_user(db, seg.song_id)
+            q = q.filter(Recording.segment_id == segment_id, Recording.owner_admin_id == seg.owner_admin_id)
+        else:
+            free_task = db.get(FreeTask, segment_id)
+            if not free_task:
+                raise HTTPException(status_code=404, detail="唱段不存在")
+            song = _get_active_song_for_user(db, free_task.song_id)
+            q = q.filter(Recording.segment_id == segment_id, Recording.owner_admin_id == song.owner_admin_id)
     return {"success": True, "data": [r.to_dict() for r in q.all()]}
 
 
@@ -3198,11 +3211,51 @@ async def admin_create_free_task(song_id: str, request: Request, db: Session = D
     return {"success": True, "data": data}
 
 
+@router.put("/admin/songs/{song_id}/free-tasks/{free_task_id}")
+async def admin_update_free_task(song_id: str, free_task_id: str, request: Request, db: Session = Depends(get_db)):
+    """编辑自由任务"""
+    admin = verify_admin(request, db)
+    _get_owned_song(db, song_id, admin)
+
+    ft = db.query(FreeTask).filter(FreeTask.id == free_task_id, FreeTask.song_id == song_id).first()
+    if not ft:
+        raise HTTPException(status_code=404, detail="自由任务不存在")
+
+    body = await request.json()
+    description = (body.get("description") or "").strip()
+    start_time = float(body.get("start_time", 0))
+    end_time = float(body.get("end_time", 0))
+    difficulty = body.get("difficulty", "normal")
+    task_type = body.get("type", "solo")
+
+    if not description:
+        raise HTTPException(status_code=400, detail="描述文字不能为空")
+    if end_time - start_time < 5:
+        raise HTTPException(status_code=400, detail="时间间隔至少需要5秒")
+
+    ft.description = description
+    ft.start_time = start_time
+    ft.end_time = end_time
+    ft.difficulty = difficulty
+    ft.task_type = task_type
+
+    db.commit()
+    db.refresh(ft)
+    data = ft.to_dict()
+    data["recordings"] = [
+        r.to_dict() for r in db.query(Recording).filter(
+            Recording.song_id == song_id,
+            Recording.segment_id == ft.id,
+        ).all()
+    ]
+    return {"success": True, "data": data}
+
+
 @router.delete("/admin/songs/{song_id}/free-tasks/{free_task_id}")
 async def admin_delete_free_task(song_id: str, free_task_id: str, request: Request, db: Session = Depends(get_db)):
     """删除自由任务（同时删除其录音）"""
     admin = verify_admin(request, db)
-    song = _get_owned_song(db, song_id, admin)
+    _get_owned_song(db, song_id, admin)
 
     ft = db.query(FreeTask).filter(FreeTask.id == free_task_id, FreeTask.song_id == song_id).first()
     if not ft:
@@ -3339,8 +3392,8 @@ async def admin_trim_recording(recording_id: str, request: Request, db: Session 
             print(f"[trim] ffmpeg error: {result.stderr}")
             raise Exception(result.stderr[-500:] if len(result.stderr) > 500 else result.stderr)
 
-        # 替换原文件
-        shutil.move(tmp_path, src_path)
+        # 替换原文件（Windows 下 shutil.move 到已存在目标可能失败，用 os.replace 原子覆盖）
+        os.replace(tmp_path, src_path)
         return {"success": True, "data": rec.to_dict()}
     except Exception as e:
         # 清理临时文件
@@ -3617,7 +3670,23 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
                     print(f"[synth] read wav failed: {e}")
                     continue
 
-                start_sample = int(seg["start_time"] * sr)
+                start_time = rec.get("_startOffset", seg.get("start_time", 0))
+                try:
+                    start_time = float(start_time)
+                except Exception:
+                    start_time = seg.get("start_time", 0)
+
+                trim_start = max(0.0, float(rec.get("_trimStart", 0) or 0))
+                trim_end = max(0.0, float(rec.get("_trimEnd", 0) or 0))
+                if trim_start > 0 or trim_end > 0:
+                    start_idx = min(len(audio), int(trim_start * sr))
+                    end_idx = len(audio) - min(len(audio), int(trim_end * sr))
+                    if start_idx > 0:
+                        audio[:start_idx] = 0
+                    if end_idx < len(audio):
+                        audio[max(0, end_idx):] = 0
+
+                start_sample = int(max(0.0, start_time) * sr)
                 vocal_tracks.append((audio, start_sample, seg, rec))
 
         if not vocal_tracks:
@@ -3645,6 +3714,9 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
         normalized_tracks = []
         for audio, start_sample, seg, rec in processed_tracks:
             audio = _normalize_loudness(audio, target_db=-18.0)
+            gain_db = float(rec.get("_gain", 0) or 0)
+            if gain_db:
+                audio = (audio.astype(np.float32) * (10 ** (gain_db / 20.0))).astype(np.float32)
             normalized_tracks.append((audio, start_sample, seg, rec))
         task.update({"progress": 45, "message": "响度均衡完成"})
 
@@ -3901,6 +3973,11 @@ async def admin_start_synthesis(song_id: str, request: Request, db: Session = De
             params = rec_params.get(r.id, {})
             d["_pitchShift"] = params.get("pitchShift", 0)
             d["_reverb"] = params.get("reverb", 0)
+            d["_gain"] = params.get("gain", 0)
+            d["_trimStart"] = params.get("trimStart", 0)
+            d["_trimEnd"] = params.get("trimEnd", 0)
+            d["_startOffset"] = params.get("startOffset", seg.get("start_time", 0))
+            d["_duration"] = params.get("duration", 0)
             seg_recs.append(d)
         recordings_map[seg["id"]] = seg_recs
 
