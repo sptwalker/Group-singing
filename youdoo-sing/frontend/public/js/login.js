@@ -1,4 +1,13 @@
 (async function () {
+    const urlParams = new URLSearchParams(window.location.search || '');
+    const urlTarget = urlParams.get('target') || '';
+    if (urlTarget) {
+        setPendingLoginTarget(urlTarget);
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('target');
+        window.history.replaceState({}, document.title, `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+    }
+
     if (hasWechatAuthCallbackParams()) {
         const btnLogin = document.getElementById('btnLogin');
         if (btnLogin) {
@@ -45,14 +54,15 @@
     }
 
     async function handleWechatLogin() {
-        setPendingLoginTarget('task.html');
+        const target = getPendingLoginTarget(getCurrentPageTarget('task.html'));
+        setPendingLoginTarget(target);
         btnLogin.disabled = true;
         btnLogin.innerHTML = '<span class="wechat-icon">&#128241;</span> 跳转微信授权...';
-        window.location.href = `${API_BASE}/auth/wechat/login?target=${encodeURIComponent('task.html')}`;
+        window.location.href = `${API_BASE}/auth/wechat/login?target=${encodeURIComponent(target)}`;
     }
 
     btnLogin.addEventListener('click', async () => {
-        setPendingLoginTarget('task.html');
+        setPendingLoginTarget(getPendingLoginTarget(getCurrentPageTarget('task.html')));
 
         const config = await getWechatLoginConfig();
         if (!config.enabled) {

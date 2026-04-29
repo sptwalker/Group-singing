@@ -115,6 +115,12 @@ async function renderEditor(container) {
             <div class="playbar-progress" id="pbProgress"><div class="playbar-progress-fill" id="pbFill"></div></div>
             <div class="playbar-volume"><span>🔊</span><input type="range" id="wsVol" min="0" max="100" value="80"></div>
         </div>
+        <div class="editor-share-link" id="editorShareLink" style="display:none;">
+            <div class="share-title">微信端任务分享链接</div>
+            <input type="text" id="editorShareUrl" readonly>
+            <button class="btn btn-outline btn-sm" id="btnCopyShareLink" type="button">复制链接</button>
+            <span class="share-hint">用户在微信打开后，登录完成会自动进入该歌曲任务。</span>
+        </div>
     </div>`;
         if (!document.getElementById('ctxMenu')) {
             const cm = document.createElement('div');
@@ -1051,6 +1057,7 @@ async function _loadSong(songId) {
         const _en = id => { const el = document.getElementById(id); if(el) el.disabled = false; };
         _en('btnSaveAll'); _en('btnReset'); _en('btnPlay'); _en('btnPlayPause'); _en('btnLoop');
         _en('btnPublishTask');
+        _bindEditorShareLink();
         _syncToolbarSegButtons();
         _initWS();
         _renderSegList();

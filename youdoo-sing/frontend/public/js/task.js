@@ -67,7 +67,10 @@
                 songTitle.textContent = '暂无拼歌任务';
                 return;
             }
-            loadSong(0);
+            const params = new URLSearchParams(window.location.search || '');
+            const targetSongId = params.get('song') || params.get('song_id') || '';
+            const targetIndex = targetSongId ? songs.findIndex(s => s.id === targetSongId) : -1;
+            loadSong(targetIndex >= 0 ? targetIndex : 0);
         } catch (e) {
             showToast('加载失败：' + e.message);
         }

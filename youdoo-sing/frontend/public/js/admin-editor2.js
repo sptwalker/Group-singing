@@ -637,6 +637,7 @@ async function _confirmPublishTask() {
         editorSong.task_published = true;
         showToast('任务已发布', 'success');
         _applyPublishLock();
+        _renderEditorShareLink();
     } catch (e) {
         showToast(e.message, 'error');
     }
@@ -666,6 +667,7 @@ async function _confirmUnpublishTask() {
         editorHistory = []; editorHistoryIdx = -1; _pushHistory();
         _renderSegList(); _renderOverlay();
         _applyPublishLock();
+        _renderEditorShareLink();
     } catch (e) {
         showToast(e.message, 'error');
     }
@@ -724,4 +726,42 @@ function _applyPublishLock() {
     if (overlayHost) {
         overlayHost.style.pointerEvents = isPublished ? 'none' : '';
     }
+
+    _renderEditorShareLink();
+}
+
+function _getEditorShareUrl() {
+    if (!editorSong) return '';
+    const taskTarget = `task.html?song=${encodeURIComponent(editorSong.id)}`;
+    const pageUrl = new URL('index.html', window.location.href);
+    pageUrl.searchParams.set('target', taskTarget);
+    return pageUrl.href;
+}
+
+function _renderEditorShareLink() {
+    const wrap = document.getElementById('editorShareLink');
+    const input = document.getElementById('editorShareUrl');
+    if (!wrap || !input) return;
+    const isPublished = !!(editorSong && editorSong.task_published);
+    wrap.style.display = isPublished ? '' : 'none';
+    input.value = isPublished ? _getEditorShareUrl() : '';
+}
+
+function _bindEditorShareLink() {
+    _renderEditorShareLink();
+    const btn = document.getElementById('btnCopyShareLink');
+    if (!btn || btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', async () => {
+        const input = document.getElementById('editorShareUrl');
+        if (!input || !input.value) return;
+        try {
+            await navigator.clipboard.writeText(input.value);
+            showToast('分享链接已复制', 'success');
+        } catch (e) {
+            input.select();
+            document.execCommand('copy');
+            showToast('分享链接已复制', 'success');
+        }
+    });
 }
