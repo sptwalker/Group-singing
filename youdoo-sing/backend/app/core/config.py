@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50MB
 
+    # 华为云 OBS 配置
+    OBS_ENDPOINT: str = ""
+    OBS_ACCESS_KEY: str = ""
+    OBS_SECRET_KEY: str = ""
+    OBS_BUCKET: str = ""
+
     # 音频处理配置
     SEGMENT_MIN_DURATION: float = 3.0
     SEGMENT_MAX_DURATION: float = 15.0

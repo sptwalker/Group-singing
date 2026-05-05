@@ -30,6 +30,10 @@ from app.core.config import get_settings
 from app.core.multitenant import hash_password, verify_password, get_setting, set_setting, log_audit, new_id, now_str
 from app.core.auth import create_session, delete_session, set_session_cookie, clear_session_cookie, get_current_user, COOKIE_NAME
 from app.models import Song, Segment, SegmentClaim, Recording, User, FreeTask, Final, AdminUser, AdminInviteCode, SystemSetting, AuditLog
+from app.core.obs_client import (
+    obs_upload_file, obs_download_file, obs_delete_object,
+    obs_get_presigned_url, obs_delete_prefix, url_to_obs_key,
+)
 
 # OpenAI API 配置（用于 DeepSeek 等兼容接口）
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -1753,6 +1757,12 @@ async def upload_recording(
     content = await audio.read()
     with open(filepath, "wb") as f:
         f.write(content)
+    if not obs_upload_file(filepath, f"uploads/{filename}"):
+        try: os.remove(filepath)
+        except Exception: pass
+        raise HTTPException(status_code=500, detail="录音上传到 OBS 失败")
+    try: os.remove(filepath)
+    except Exception: pass
 
     parsed_detail = None
     if score_detail:
@@ -1870,13 +1880,9 @@ async def delete_recording(recording_id: str, request: Request, db: Session = De
     db.delete(rec)
     db.commit()
 
-    fname = audio_url.split("/")[-1] if "/" in audio_url else f"{recording_id}.webm"
-    filepath = os.path.join(UPLOAD_DIR, fname)
-    if os.path.exists(filepath):
-        try:
-            os.remove(filepath)
-        except Exception:
-            pass
+    obs_key = url_to_obs_key(audio_url)
+    if obs_key:
+        obs_delete_object(obs_key)
     return {"success": True, "message": "已删除"}
 
 
@@ -1947,17 +1953,9 @@ async def serve_music(filename: str):
 
 @router.get("/uploads/{filename:path}")
 async def serve_upload(filename: str):
-    """提供上传文件（音频/录音）"""
-    filepath = os.path.join(UPLOAD_DIR, filename)
-    if not os.path.exists(filepath):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    ext = os.path.splitext(filename)[1].lower()
-    mime_map = {
-        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac',
-        '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
-        '.wma': 'audio/x-ms-wma', '.webm': 'audio/webm',
-    }
-    return FileResponse(filepath, media_type=mime_map.get(ext, 'application/octet-stream'))
+    """提供上传文件（音频/录音）— 重定向到 OBS 预签名 URL"""
+    presigned = obs_get_presigned_url(f"uploads/{filename}", expires=3600)
+    return RedirectResponse(url=presigned, status_code=307)
 
 
 # ============ 管理员鉴权 ============
@@ -2429,7 +2427,9 @@ async def super_purge_admin_data(admin_id: str, request: Request, db: Session = 
     admin = db.get(AdminUser, admin_id)
     if not admin or admin.status != "deleted" or admin.role == "super_admin":
         raise HTTPException(status_code=400, detail="只能清理已软删除的普通管理员")
-    song_ids = [s.id for s in db.query(Song).filter(Song.owner_admin_id == admin_id).all()]
+    song_rows = db.query(Song).filter(Song.owner_admin_id == admin_id).all()
+    song_files = [(s.audio_file, s.accompaniment_file) for s in song_rows]
+    song_ids = [s.id for s in song_rows]
     rec_files = [os.path.basename(r.audio_url or "") for r in db.query(Recording).filter(Recording.owner_admin_id == admin_id).all()]
     final_rows = db.query(Final).filter(Final.owner_admin_id == admin_id).all()
     for model in (Recording, SegmentClaim, FreeTask, Segment, Final, Song):
@@ -2438,23 +2438,17 @@ async def super_purge_admin_data(admin_id: str, request: Request, db: Session = 
     db.commit()
     for fname in rec_files:
         if fname:
-            fp = os.path.join(UPLOAD_DIR, fname)
-            if os.path.exists(fp):
-                try: os.remove(fp)
-                except Exception: pass
-    for sid in song_ids:
-        for fp in [os.path.join(UPLOAD_DIR, f"{sid}.mp3"), os.path.join(UPLOAD_DIR, f"{sid}.wav")]:
-            if os.path.exists(fp):
-                try: os.remove(fp)
-                except Exception: pass
+            obs_delete_object(f"uploads/{fname}")
+    for audio_f, acc_f in song_files:
+        if audio_f:
+            obs_delete_object(f"uploads/{audio_f}")
+        if acc_f:
+            obs_delete_object(f"uploads/{acc_f}")
     for f in final_rows:
-        for name in (f.audio_file, f.metadata_file):
-            if name and os.path.exists(os.path.join(FINALS_DIR, name)):
-                try: os.remove(os.path.join(FINALS_DIR, name))
-                except Exception: pass
-        if f.recordings_dir and os.path.exists(os.path.join(FINALS_DIR, f.recordings_dir)):
-            try: shutil.rmtree(os.path.join(FINALS_DIR, f.recordings_dir))
-            except Exception: pass
+        if f.audio_file:
+            obs_delete_object(f"finals/{f.audio_file}")
+        if f.recordings_dir:
+            obs_delete_prefix(f"finals/{f.recordings_dir}/")
     log_audit(db, super_admin, "super_purge_admin_data", "admin_user", admin_id)
     db.commit()
     return {"success": True, "message": "软删除账户数据已清理"}
@@ -2582,8 +2576,16 @@ async def admin_upload_song(
 
     duration = _get_audio_duration(filepath)
     if duration <= 0:
-        os.remove(filepath)
+        try: os.remove(filepath)
+        except Exception: pass
         raise HTTPException(status_code=400, detail="无法读取音频时长，请检查文件是否损坏")
+
+    if not obs_upload_file(filepath, f"uploads/{safe_filename}"):
+        try: os.remove(filepath)
+        except Exception: pass
+        raise HTTPException(status_code=500, detail="歌曲上传到 OBS 失败")
+    try: os.remove(filepath)
+    except Exception: pass
 
     audio_url = f"/api/uploads/{safe_filename}"
     song = Song(
@@ -2622,18 +2624,13 @@ async def admin_get_songs(request: Request, db: Session = Depends(get_db)):
     for s in songs_orm:
         audio_file = s.audio_file or ""
         audio_url = s.audio_url or ""
-        audio_exists = False
-        if audio_file:
-            audio_exists = os.path.exists(os.path.join(UPLOAD_DIR, audio_file))
-        if not audio_exists and audio_url:
-            if "/api/uploads/" in audio_url:
-                fname = audio_url.split("/api/uploads/")[-1]
-                audio_exists = os.path.exists(os.path.join(UPLOAD_DIR, fname))
-            elif "/api/music/" in audio_url:
-                fname = audio_url.split("/api/music/")[-1]
-                audio_exists = os.path.exists(os.path.join(MUSIC_DIR, fname))
+        if "/api/music/" in audio_url:
+            fname = audio_url.split("/api/music/")[-1]
+            audio_exists = os.path.exists(os.path.join(MUSIC_DIR, fname))
+        else:
+            audio_exists = bool(audio_file or audio_url)
         acc_file = s.accompaniment_file or ""
-        has_acc = bool(acc_file) and os.path.exists(os.path.join(UPLOAD_DIR, acc_file))
+        has_acc = bool(acc_file)
         has_lyrics = bool(s.has_lyrics) or any((seg.lyrics or "").strip() for seg in s.segments)
         d = s.to_dict(include_segments=True)
         d.update({
@@ -2666,7 +2663,7 @@ async def admin_get_song(song_id: str, request: Request, db: Session = Depends(g
         enriched_segments.append(seg_d)
 
     acc_file = song.accompaniment_file or ""
-    has_acc = bool(acc_file) and os.path.exists(os.path.join(UPLOAD_DIR, acc_file))
+    has_acc = bool(acc_file)
     has_lyrics = bool(song.has_lyrics) or any((seg.lyrics or "").strip() for seg in song.segments)
 
     data = song.to_dict(include_segments=False)
@@ -2725,31 +2722,20 @@ async def admin_delete_song(song_id: str, request: Request, db: Session = Depend
     db.commit()
 
     # 文件系统清理
+    # OBS 清理
     for url in rec_audio_urls:
-        fname = os.path.basename(url)
-        if fname:
-            fp = os.path.join(UPLOAD_DIR, fname)
-            if os.path.exists(fp):
-                try: os.remove(fp)
-                except Exception: pass
+        obs_key = url_to_obs_key(url)
+        if obs_key:
+            obs_delete_object(obs_key)
     if audio_file:
-        fp = os.path.join(UPLOAD_DIR, audio_file)
-        if os.path.exists(fp):
-            try: os.remove(fp)
-            except Exception: pass
+        obs_delete_object(f"uploads/{audio_file}")
     if acc_file:
-        fp = os.path.join(UPLOAD_DIR, acc_file)
-        if os.path.exists(fp):
-            try: os.remove(fp)
-            except Exception: pass
+        obs_delete_object(f"uploads/{acc_file}")
     for kind, name in final_files:
-        fp = os.path.join(FINALS_DIR, name)
-        if kind == "dir" and os.path.exists(fp):
-            try: shutil.rmtree(fp)
-            except Exception: pass
-        elif kind == "audio" and os.path.exists(fp):
-            try: os.remove(fp)
-            except Exception: pass
+        if kind == "dir":
+            obs_delete_prefix(f"finals/{name}/")
+        elif kind == "audio":
+            obs_delete_object(f"finals/{name}")
 
     return {"success": True, "message": "歌曲已删除"}
 
@@ -2801,21 +2787,29 @@ async def admin_upload_lyrics(song_id: str, request: Request, db: Session = Depe
                     resegmented = True
                     segments_dicts = updated
             if not resegmented:
-                if no_segments:
-                    filepath = os.path.join(UPLOAD_DIR, song.audio_file or "")
-                    if os.path.exists(filepath):
-                        seg_new, _ = _split_and_analyze(song.id, filepath, duration)
-                        segments_dicts = seg_new
+                if no_segments and song.audio_file:
+                    _tmp = os.path.join(UPLOAD_DIR, song.audio_file)
+                    if obs_download_file(f"uploads/{song.audio_file}", _tmp):
+                        try:
+                            seg_new, _ = _split_and_analyze(song.id, _tmp, duration)
+                            segments_dicts = seg_new
+                        finally:
+                            try: os.unlink(_tmp)
+                            except Exception: pass
                 updated = _assign_lrc_to_segments(segments_dicts, lrc_lines)
                 segments_dicts = updated
         else:
             updated = segments_dicts
     else:
-        if no_segments:
-            filepath = os.path.join(UPLOAD_DIR, song.audio_file or "")
-            if os.path.exists(filepath):
-                seg_new, _ = _split_and_analyze(song.id, filepath, duration)
-                segments_dicts = seg_new
+        if no_segments and song.audio_file:
+            _tmp = os.path.join(UPLOAD_DIR, song.audio_file)
+            if obs_download_file(f"uploads/{song.audio_file}", _tmp):
+                try:
+                    seg_new, _ = _split_and_analyze(song.id, _tmp, duration)
+                    segments_dicts = seg_new
+                finally:
+                    try: os.unlink(_tmp)
+                    except Exception: pass
         updated = _ai_assign_lyrics(segments_dicts, full_lyrics)
         segments_dicts = updated
 
@@ -2880,20 +2874,28 @@ async def admin_auto_fetch_lyrics(song_id: str, request: Request, db: Session = 
                     resegmented = True
 
             if not has_lyrics:
-                if no_segments:
-                    filepath = os.path.join(UPLOAD_DIR, song.audio_file or "")
-                    if os.path.exists(filepath):
-                        seg_new, _ = _split_and_analyze(song.id, filepath, duration)
-                        segments_dicts = seg_new
+                if no_segments and song.audio_file:
+                    _tmp = os.path.join(UPLOAD_DIR, song.audio_file)
+                    if obs_download_file(f"uploads/{song.audio_file}", _tmp):
+                        try:
+                            seg_new, _ = _split_and_analyze(song.id, _tmp, duration)
+                            segments_dicts = seg_new
+                        finally:
+                            try: os.unlink(_tmp)
+                            except Exception: pass
                 updated = _assign_lrc_to_segments(segments_dicts, lrc_lines)
                 has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
 
     if not has_lyrics:
-        if no_segments:
-            filepath = os.path.join(UPLOAD_DIR, song.audio_file or "")
-            if os.path.exists(filepath):
-                seg_new, _ = _split_and_analyze(song.id, filepath, duration)
-                segments_dicts = seg_new
+        if no_segments and song.audio_file:
+            _tmp = os.path.join(UPLOAD_DIR, song.audio_file)
+            if obs_download_file(f"uploads/{song.audio_file}", _tmp):
+                try:
+                    seg_new, _ = _split_and_analyze(song.id, _tmp, duration)
+                    segments_dicts = seg_new
+                finally:
+                    try: os.unlink(_tmp)
+                    except Exception: pass
         updated = _ai_assign_lyrics(segments_dicts, fetched_text)
         has_lyrics = any(s.get("lyrics", "").strip() for s in updated)
 
@@ -3052,13 +3054,9 @@ async def admin_batch_update_segments(song_id: str, request: Request, db: Sessio
             Recording.segment_id.in_(removed_seg_ids),
         ).all()
         for r in all_orphan_recs:
-            rec_url = r.audio_url or ""
-            fname = os.path.basename(rec_url)
-            if fname:
-                fp = os.path.join(UPLOAD_DIR, fname)
-                if os.path.exists(fp):
-                    try: os.remove(fp)
-                    except Exception: pass
+            obs_key = url_to_obs_key(r.audio_url or "")
+            if obs_key:
+                obs_delete_object(obs_key)
             db.delete(r)
         deleted_recordings = sum(1 for r in all_orphan_recs if r.submitted)
 
@@ -3127,13 +3125,9 @@ async def admin_unpublish_task(song_id: str, request: Request, db: Session = Dep
     recs = db.query(Recording).filter(Recording.song_id == song_id).all()
     deleted_count = 0
     for r in recs:
-        url = r.audio_url or ""
-        fname = url.split("/")[-1] if "/" in url else url
-        if fname:
-            fp = os.path.join(UPLOAD_DIR, fname)
-            if os.path.exists(fp):
-                try: os.remove(fp)
-                except Exception: pass
+        obs_key = url_to_obs_key(r.audio_url or "")
+        if obs_key:
+            obs_delete_object(obs_key)
         db.delete(r)
         deleted_count += 1
 
@@ -3263,13 +3257,9 @@ async def admin_delete_free_task(song_id: str, free_task_id: str, request: Reque
 
     recs_to_del = db.query(Recording).filter(Recording.segment_id == free_task_id).all()
     for rec in recs_to_del:
-        url = rec.audio_url or ""
-        fname = url.split("/")[-1] if "/" in url else url
-        if fname:
-            fp = os.path.join(UPLOAD_DIR, fname)
-            if os.path.exists(fp):
-                try: os.remove(fp)
-                except Exception: pass
+        obs_key = url_to_obs_key(rec.audio_url or "")
+        if obs_key:
+            obs_delete_object(obs_key)
         db.delete(rec)
 
     db.delete(ft)
@@ -3343,9 +3333,10 @@ async def admin_trim_recording(recording_id: str, request: Request, db: Session 
 
     audio_url = rec.audio_url or ""
     filename = audio_url.split("/")[-1] if "/" in audio_url else audio_url
+    obs_key = url_to_obs_key(audio_url) or f"uploads/{filename}"
     src_path = os.path.join(UPLOAD_DIR, filename)
 
-    if not os.path.exists(src_path):
+    if not obs_download_file(obs_key, src_path):
         raise HTTPException(status_code=404, detail="音频文件不存在")
 
     # 使用 ffmpeg 获取音频时长
@@ -3360,13 +3351,10 @@ async def admin_trim_recording(recording_id: str, request: Request, db: Session 
         total_duration = 0
 
     if total_duration > 0 and (trim_start + trim_end) >= total_duration:
+        try: os.remove(src_path)
+        except Exception: pass
         raise HTTPException(status_code=400, detail="裁剪范围超出音频时长")
 
-    # 使用 ffmpeg volume 滤镜将裁剪区域静音，保持总时长不变
-    # 构建 volume 滤镜表达式：
-    #   - 0 ~ trim_start 秒：静音
-    #   - trim_start ~ (total_duration - trim_end) 秒：保持原声
-    #   - (total_duration - trim_end) ~ total_duration 秒：静音
     ext = os.path.splitext(filename)[1]
     tmp_path = src_path + ".trimmed" + ext
 
@@ -3378,9 +3366,10 @@ async def admin_trim_recording(recording_id: str, request: Request, db: Session 
         volume_expr_parts.append(f"gte(t,{mute_from})")
 
     if not volume_expr_parts:
+        try: os.remove(src_path)
+        except Exception: pass
         return {"success": True, "message": "无需裁剪"}
 
-    # volume=0 when in mute regions, else 1
     mute_condition = "+".join(volume_expr_parts)
     volume_filter = f"volume='if({mute_condition},0,1)':eval=frame"
 
@@ -3392,13 +3381,19 @@ async def admin_trim_recording(recording_id: str, request: Request, db: Session 
             print(f"[trim] ffmpeg error: {result.stderr}")
             raise Exception(result.stderr[-500:] if len(result.stderr) > 500 else result.stderr)
 
-        # 替换原文件（Windows 下 shutil.move 到已存在目标可能失败，用 os.replace 原子覆盖）
         os.replace(tmp_path, src_path)
+        if not obs_upload_file(src_path, obs_key):
+            raise Exception("裁剪结果上传到 OBS 失败")
+        try: os.remove(src_path)
+        except Exception: pass
         return {"success": True, "data": rec.to_dict()}
     except Exception as e:
-        # 清理临时文件
         if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+            try: os.remove(tmp_path)
+            except Exception: pass
+        if os.path.exists(src_path):
+            try: os.remove(src_path)
+            except Exception: pass
         raise HTTPException(status_code=500, detail=f"裁剪失败: {str(e)}")
 
 
@@ -3467,18 +3462,27 @@ async def admin_upload_accompaniment(
 
     acc_duration = _get_audio_duration(tmp_filepath)
     if acc_duration <= 0:
-        os.remove(tmp_filepath)
+        try: os.remove(tmp_filepath)
+        except Exception: pass
         raise HTTPException(status_code=400, detail="无法读取伴奏时长，请检查文件是否损坏")
 
     song_duration = song.duration or 0
     diff = abs(acc_duration - song_duration)
     tolerance = max(5.0, song_duration * 0.03)
     if diff > tolerance:
-        os.remove(tmp_filepath)
+        try: os.remove(tmp_filepath)
+        except Exception: pass
         raise HTTPException(
             status_code=400,
             detail=f"伴奏时长({acc_duration:.1f}s)与原曲({song_duration:.1f}s)相差{diff:.1f}s，超出容差{tolerance:.1f}s"
         )
+
+    if not obs_upload_file(tmp_filepath, f"uploads/{tmp_filename}"):
+        try: os.remove(tmp_filepath)
+        except Exception: pass
+        raise HTTPException(status_code=500, detail="伴奏上传到 OBS 失败")
+    try: os.remove(tmp_filepath)
+    except Exception: pass
 
     song.accompaniment_url = f"/api/uploads/{tmp_filename}"
     song.accompaniment_file = tmp_filename
@@ -3508,10 +3512,7 @@ async def admin_delete_accompaniment(song_id: str, request: Request, db: Session
     song.accompaniment_duration = None
     db.commit()
     if acc_file:
-        fp = os.path.join(UPLOAD_DIR, acc_file)
-        if os.path.exists(fp):
-            try: os.remove(fp)
-            except Exception: pass
+        obs_delete_object(f"uploads/{acc_file}")
     return {"success": True, "message": "伴奏已删除"}
 
 
@@ -3644,9 +3645,10 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
             for rec in seg_recs:
                 audio_url = rec.get("audio_url", "")
                 filename = os.path.basename(audio_url)
-                src_path = os.path.join(UPLOAD_DIR, filename)
-                if not os.path.exists(src_path):
-                    print(f"[synth] recording file not found: {src_path}")
+                src_path = os.path.join(work_dir, filename)
+                obs_key = url_to_obs_key(audio_url) or f"uploads/{filename}"
+                if not obs_download_file(obs_key, src_path):
+                    print(f"[synth] recording not found in OBS: {obs_key}")
                     continue
 
                 wav_path = os.path.join(work_dir, f"rec_{rec['id']}.wav")
@@ -3779,12 +3781,12 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
 
         task.update({"progress": 85, "message": "最终混音 - 混合伴奏..."})
 
-        # 加载伴奏
+        # 加载伴奏（从 OBS 下载到 work_dir）
         acc_file = song.get("accompaniment_file", "")
         acc_audio = None
         if acc_file:
-            acc_path = os.path.join(UPLOAD_DIR, acc_file)
-            if os.path.exists(acc_path):
+            acc_path = os.path.join(work_dir, acc_file)
+            if obs_download_file(f"uploads/{acc_file}", acc_path):
                 acc_wav = os.path.join(work_dir, "acc.wav")
                 if _convert_to_wav(acc_path, acc_wav, sr=sr):
                     try:
@@ -3821,7 +3823,7 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
 
         task.update({"progress": 92, "message": "最终混音 - 导出文件..."})
 
-        # 保存最终音频
+        # 保存最终音频（临时写到 FINALS_DIR，完成后上传 OBS）
         final_id = str(uuid.uuid4())[:8]
         final_filename = f"final_{song_id}_{final_id}.wav"
         final_path = os.path.join(FINALS_DIR, final_filename)
@@ -3836,11 +3838,18 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
                 capture_output=True, timeout=120
             )
             if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 0:
-                os.remove(final_path)
+                try: os.remove(final_path)
+                except Exception: pass
                 final_filename = mp3_filename
                 final_path = mp3_path
         except Exception:
             pass
+
+        # 上传最终音频到 OBS
+        if not obs_upload_file(final_path, f"finals/{final_filename}"):
+            raise ValueError("最终成曲上传到 OBS 失败")
+        try: os.remove(final_path)
+        except Exception: pass
 
         # 保存元数据
         metadata = {
@@ -3873,22 +3882,21 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
                 })
             metadata["segments"].append(seg_meta)
 
-        meta_path = os.path.join(FINALS_DIR, f"meta_{song_id}_{final_id}.json")
+        meta_filename = f"meta_{song_id}_{final_id}.json"
+        meta_path = os.path.join(FINALS_DIR, meta_filename)
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
+        # JSON 元数据仅作本地归档，不上传 OBS
 
-        # 复制所有唱段录音到 finals 目录备份
-        recs_dir = os.path.join(FINALS_DIR, f"recs_{song_id}_{final_id}")
-        os.makedirs(recs_dir, exist_ok=True)
+        # 上传录音备份到 OBS（录音已在 work_dir 中）
+        recs_prefix = f"recs_{song_id}_{final_id}"
         for seg in segments:
             seg_recs = recordings_map.get(seg["id"], [])
             for rec in seg_recs:
-                src = os.path.join(UPLOAD_DIR, os.path.basename(rec.get("audio_url", "")))
-                if os.path.exists(src):
-                    try:
-                        shutil.copy2(src, os.path.join(recs_dir, os.path.basename(src)))
-                    except Exception:
-                        pass
+                fname = os.path.basename(rec.get("audio_url", ""))
+                src = os.path.join(work_dir, fname)
+                if fname and os.path.exists(src):
+                    obs_upload_file(src, f"finals/{recs_prefix}/{fname}")
 
         # 保存到数据库（在后台线程中开新 Session）
         with db_session() as db_bg:
@@ -3902,8 +3910,8 @@ def _run_synthesis(song_id: str, song: dict, segments: list, recordings_map: dic
                 duration=duration,
                 audio_file=final_filename,
                 audio_url=f"/api/finals/{final_filename}",
-                metadata_file=f"meta_{song_id}_{final_id}.json",
-                recordings_dir=f"recs_{song_id}_{final_id}",
+                metadata_file=meta_filename,
+                recordings_dir=recs_prefix,
                 track_count=len(final_tracks),
                 segment_count=len(segments),
                 published=False,
@@ -4071,32 +4079,14 @@ async def admin_delete_final(final_id: str, request: Request, db: Session = Depe
     db.commit()
 
     if audio_file:
-        fp = os.path.join(FINALS_DIR, audio_file)
-        if os.path.exists(fp):
-            try: os.remove(fp)
-            except Exception: pass
-    if meta_file:
-        fp = os.path.join(FINALS_DIR, meta_file)
-        if os.path.exists(fp):
-            try: os.remove(fp)
-            except Exception: pass
+        obs_delete_object(f"finals/{audio_file}")
     if recs_dir:
-        dp = os.path.join(FINALS_DIR, recs_dir)
-        if os.path.exists(dp):
-            try: shutil.rmtree(dp)
-            except Exception: pass
+        obs_delete_prefix(f"finals/{recs_dir}/")
     return {"success": True, "message": "成曲已删除"}
 
 
 @router.get("/finals/{filename:path}")
 async def serve_final_file(filename: str):
-    """提供最终成曲文件（/api/finals/ 路径）"""
-    filepath = os.path.join(FINALS_DIR, filename)
-    if not os.path.exists(filepath):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    ext = os.path.splitext(filename)[1].lower()
-    mime_map = {
-        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac',
-        '.ogg': 'audio/ogg',
-    }
-    return FileResponse(filepath, media_type=mime_map.get(ext, 'application/octet-stream'))
+    """提供最终成曲文件（/api/finals/ 路径）— 重定向到 OBS 预签名 URL"""
+    presigned = obs_get_presigned_url(f"finals/{filename}", expires=3600)
+    return RedirectResponse(url=presigned, status_code=307)
